@@ -146,17 +146,16 @@ async function assessRepository(owner, repo) {
         const ciEval = evaluateCI(hasCI, ciType);
         const versioningEval = evaluateVersioning(tags);
         const citationEval = evaluateCitation(hasCitation, readmeContent);
-        const codeQualityEval = evaluateCodeQuality(hasCodeQuality, qualityDetails);
         
         // Calculate total score
         const totalScore = readmeEval.score + licenseEval.score + testsEval.score + 
                           ciEval.score + versioningEval.score + citationEval.score;
         
-        // Generate fixes checklist with ALL priorities (HIGH, MEDIUM, LOW)
+        // Generate fixes checklist - ADD ALL FIXES REGARDLESS OF SCORE
         const fixes = [];
         
-        // HIGH IMPACT FIXES
-        if (licenseEval.score === 0) {
+        // HIGH IMPACT FIXES - Add if not perfect
+        if (licenseEval.score < 20) {
             fixes.push({
                 icon: '❌',
                 title: 'Add a LICENSE file to the root directory',
@@ -165,39 +164,32 @@ async function assessRepository(owner, repo) {
                 priority: 'high',
                 suggestion: 'Add MIT, Apache-2.0, or GPL-3.0 license file'
             });
-        } else if (licenseEval.score < 15) {
-            fixes.push({
-                icon: '⚠️',
-                title: 'Update to standard open-source license',
-                description: 'Current license may not be suitable for open-source research use',
-                impact: 'HIGH IMPACT',
-                priority: 'high',
-                suggestion: 'Switch to MIT, Apache-2.0, or GPL-3.0 license'
-            });
         }
         
-        if (testsEval.score === 0) {
-            fixes.push({
-                icon: '❌',
-                title: 'Implement a basic test suite and tests directory',
-                description: 'HIGH: ENSURES SCIENTIFIC INTEGRITY AND PREVENTS REGRESSIONS',
-                impact: 'HIGH IMPACT',
-                priority: 'high',
-                suggestion: 'Add unit tests using pytest, jest, or your language\'s testing framework'
-            });
-        } else if (testsEval.score < 15) {
-            fixes.push({
-                icon: '⚠️',
-                title: 'Expand test coverage',
-                description: 'MEDIUM: CURRENT TESTS ARE LIMITED',
-                impact: 'MEDIUM IMPACT',
-                priority: 'medium',
-                suggestion: 'Add more comprehensive test cases to improve coverage'
-            });
+        if (testsEval.score < 20) {
+            if (testsEval.score === 0) {
+                fixes.push({
+                    icon: '❌',
+                    title: 'Implement a basic test suite and tests directory',
+                    description: 'HIGH: ENSURES SCIENTIFIC INTEGRITY AND PREVENTS REGRESSIONS',
+                    impact: 'HIGH IMPACT',
+                    priority: 'high',
+                    suggestion: 'Add unit tests using pytest, jest, or your language\'s testing framework'
+                });
+            } else {
+                fixes.push({
+                    icon: '⚠️',
+                    title: 'Expand test coverage',
+                    description: 'MEDIUM: CURRENT TESTS ARE LIMITED',
+                    impact: 'MEDIUM IMPACT',
+                    priority: 'medium',
+                    suggestion: 'Add more comprehensive test cases to improve coverage'
+                });
+            }
         }
         
-        // MEDIUM IMPACT FIXES
-        if (ciEval.score === 0) {
+        // MEDIUM IMPACT FIXES - Add if not perfect
+        if (ciEval.score < 15) {
             fixes.push({
                 icon: '🔘',
                 title: 'Configure GitHub Actions to automate tests',
@@ -208,64 +200,70 @@ async function assessRepository(owner, repo) {
             });
         }
         
-        if (citationEval.score === 0) {
-            fixes.push({
-                icon: '📄',
-                title: 'Create a CITATION.cff file',
-                description: 'MEDIUM: IMPROVES ACADEMIC IMPACT TRACKING',
-                impact: 'MEDIUM IMPACT',
-                priority: 'medium',
-                suggestion: 'Add CITATION.cff with authors, title, and DOI if available'
-            });
-        } else if (citationEval.score < 8) {
-            fixes.push({
-                icon: '📝',
-                title: 'Improve citation information',
-                description: 'LOW: CURRENT CITATION INFO IS INCOMPLETE',
-                impact: 'LOW IMPACT',
-                priority: 'low',
-                suggestion: 'Convert README citation info to CITATION.cff format'
-            });
+        if (citationEval.score < 10) {
+            if (citationEval.score === 0) {
+                fixes.push({
+                    icon: '📄',
+                    title: 'Create a CITATION.cff file',
+                    description: 'MEDIUM: IMPROVES ACADEMIC IMPACT TRACKING',
+                    impact: 'MEDIUM IMPACT',
+                    priority: 'medium',
+                    suggestion: 'Add CITATION.cff with authors, title, and DOI if available'
+                });
+            } else {
+                fixes.push({
+                    icon: '📝',
+                    title: 'Improve citation information',
+                    description: 'LOW: CURRENT CITATION INFO IS INCOMPLETE',
+                    impact: 'LOW IMPACT',
+                    priority: 'low',
+                    suggestion: 'Convert README citation info to CITATION.cff format'
+                });
+            }
         }
         
-        if (readmeEval.score < 20) {
-            fixes.push({
-                icon: '📖',
-                title: 'Enhance README documentation',
-                description: 'MEDIUM: IMPROVES ONSET AND USABILITY',
-                impact: 'MEDIUM IMPACT',
-                priority: 'medium',
-                suggestion: 'Add installation, usage examples, and API documentation'
-            });
-        } else if (readmeEval.score < 25) {
-            fixes.push({
-                icon: '📝',
-                title: 'Add more details to README',
-                description: 'LOW: MISSING SOME DOCUMENTATION SECTIONS',
-                impact: 'LOW IMPACT',
-                priority: 'low',
-                suggestion: 'Add structure overview and documentation links'
-            });
+        if (readmeEval.score < 25) {
+            if (readmeEval.score < 20) {
+                fixes.push({
+                    icon: '📖',
+                    title: 'Enhance README documentation',
+                    description: 'MEDIUM: IMPROVES ONSET AND USABILITY',
+                    impact: 'MEDIUM IMPACT',
+                    priority: 'medium',
+                    suggestion: 'Add installation, usage examples, and API documentation'
+                });
+            } else {
+                fixes.push({
+                    icon: '📝',
+                    title: 'Add more details to README',
+                    description: 'LOW: MISSING SOME DOCUMENTATION SECTIONS',
+                    impact: 'LOW IMPACT',
+                    priority: 'low',
+                    suggestion: 'Add structure overview and documentation links'
+                });
+            }
         }
         
-        if (versioningEval.score === 0) {
-            fixes.push({
-                icon: '🏷️',
-                title: 'Create version tags for releases',
-                description: 'MEDIUM: IMPORTANT FOR REPRODUCIBILITY',
-                impact: 'MEDIUM IMPACT',
-                priority: 'medium',
-                suggestion: 'Create semantic version tags (v1.0.0, v1.0.1, etc.)'
-            });
-        } else if (versioningEval.score < 8) {
-            fixes.push({
-                icon: '🏷️',
-                title: 'Adopt semantic versioning',
-                description: 'LOW: CURRENT TAGS NOT FOLLOWING SEMVER',
-                impact: 'LOW IMPACT',
-                priority: 'low',
-                suggestion: 'Use semantic versioning format: v1.0.0, v1.0.1, etc.'
-            });
+        if (versioningEval.score < 10) {
+            if (versioningEval.score === 0) {
+                fixes.push({
+                    icon: '🏷️',
+                    title: 'Create version tags for releases',
+                    description: 'MEDIUM: IMPORTANT FOR REPRODUCIBILITY',
+                    impact: 'MEDIUM IMPACT',
+                    priority: 'medium',
+                    suggestion: 'Create semantic version tags (v1.0.0, v1.0.1, etc.)'
+                });
+            } else {
+                fixes.push({
+                    icon: '🏷️',
+                    title: 'Adopt semantic versioning',
+                    description: 'LOW: CURRENT TAGS NOT FOLLOWING SEMVER',
+                    impact: 'LOW IMPACT',
+                    priority: 'low',
+                    suggestion: 'Use semantic versioning format: v1.0.0, v1.0.1, etc.'
+                });
+            }
         }
         
         // LOW IMPACT FIXES
@@ -490,22 +488,6 @@ function evaluateCitation(hasCitationFile, readmeContent) {
     };
 }
 
-function evaluateCodeQuality(hasConfig, details) {
-    if (!hasConfig) {
-        return {
-            score: 0,
-            reason: 'No explicit formatting configurations (like Black, Prettier, or ESLint) were found.',
-            details: []
-        };
-    }
-    
-    return {
-        score: 15,
-        reason: `Code formatting configurations detected: ${details.join(', ')}. This improves code readability and maintainability.`,
-        details: details
-    };
-}
-
 function getRating(score) {
     if (score >= 85) return 'EXCELLENT - Research Software Ready';
     if (score >= 70) return 'GOOD - Mostly Ready';
@@ -588,7 +570,6 @@ function renderResults(assessment) {
         <div class="assessment-grid">
             ${Object.entries(assessment.checks).map(([key, check]) => {
                 const impactClass = check.impact.toLowerCase().replace(' ', '-');
-                // Determine if score is below threshold (should be red)
                 const isBelowThreshold = check.score < check.threshold;
                 const scoreClass = isBelowThreshold ? 'score-low' : 'score-good';
                 return `
@@ -634,7 +615,6 @@ function renderResults(assessment) {
     resultDiv.innerHTML = html;
     resultDiv.scrollIntoView({ behavior: 'smooth', block: 'start' });
     
-    // Add event listeners for download buttons
     setTimeout(() => {
         document.getElementById('downloadHtmlBtn')?.addEventListener('click', () => downloadHTMLReport(assessment));
         document.getElementById('downloadJsonBtn')?.addEventListener('click', () => downloadJSONReport(assessment));
@@ -875,7 +855,6 @@ async function handleAssessment(input) {
         return;
     }
     
-    // Parse input (supports both full URL and owner/repo format)
     let owner, repo;
     
     if (input.includes('github.com')) {
@@ -902,7 +881,6 @@ async function handleAssessment(input) {
     try {
         const assessment = await assessRepository(owner, repo);
         renderResults(assessment);
-        // Save to localStorage
         localStorage.setItem(STORAGE_KEY, JSON.stringify(assessment));
     } catch (error) {
         console.error('Error:', error);
@@ -929,7 +907,6 @@ function loadLastAssessment() {
     }
 }
 
-// Initialize event listeners when DOM is ready
 document.addEventListener('DOMContentLoaded', () => {
     console.log('RepoReady initialized');
     
