@@ -1,96 +1,78 @@
 // Store last assessment
 const STORAGE_KEY = 'repoready_last_assessment';
 
-// Function to fetch from GitHub (no CORS issues with raw content)
-async function fetchFromGitHub(owner, repo, path) {
-    const url = `https://raw.githubusercontent.com/${owner}/${repo}/main/${path}`;
-    const fallbackUrl = `https://raw.githubusercontent.com/${owner}/${repo}/master/${path}`;
-    
+// Function to fetch from GitHub API with error handling
+async function fetchGitHubAPI(url) {
     try {
         const response = await fetch(url);
-        if (response.ok) {
-            return await response.text();
+        if (!response.ok) {
+            if (response.status === 404) return null;
+            if (response.status === 403) {
+                const remaining = response.headers.get('X-RateLimit-Remaining');
+                if (remaining === '0') {
+                    throw new Error('GitHub API rate limit exceeded. Please try again later.');
+                }
+            }
+            throw new Error(`HTTP ${response.status}`);
         }
-        const fallbackResponse = await fetch(fallbackUrl);
-        if (fallbackResponse.ok) {
-            return await fallbackResponse.text();
-        }
-        return null;
-    } catch (e) {
-        return null;
+        return await response.json();
+    } catch (error) {
+        console.error('Fetch error:', error);
+        throw error;
     }
 }
 
-// Function to check if a path exists
-async function pathExists(owner, repo, path) {
-    const content = await fetchFromGitHub(owner, repo, path);
-    return content !== null;
-}
-
-// Function to fetch directory listing from GitHub API
-async function fetchDirectory(owner, repo) {
-    const url = `https://api.github.com/repos/${owner}/${repo}/contents`;
-    try {
-        const response = await fetch(url);
-        if (response.ok) {
-            return await response.json();
-        }
-        return [];
-    } catch (e) {
-        return [];
+// Function to fetch raw content from GitHub
+async function fetchRawContent(owner, repo, path) {
+    const branches = ['main', 'master'];
+    for (const branch of branches) {
+        try {
+            const url = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${path}`;
+            const response = await fetch(url);
+            if (response.ok) {
+                return await response.text();
+            }
+        } catch (e) {}
     }
-}
-
-// Function to fetch tags
-async function fetchTags(owner, repo) {
-    const url = `https://api.github.com/repos/${owner}/${repo}/tags`;
-    try {
-        const response = await fetch(url);
-        if (response.ok) {
-            return await response.json();
-        }
-        return [];
-    } catch (e) {
-        return [];
-    }
+    return null;
 }
 
 // Main assessment function
 async function assessRepository(owner, repo) {
     try {
-        // Check if repository exists first
-        const repoCheckUrl = `https://api.github.com/repos/${owner}/${repo}`;
-        const repoCheck = await fetch(repoCheckUrl);
-        if (!repoCheck.ok) {
-            throw new Error(`Repository "${owner}/${repo}" not found`);
+        // Check if repository exists
+        const repoData = await fetchGitHubAPI(`https://api.github.com/repos/${owner}/${repo}`);
+        if (!repoData) {
+            throw new Error(`Repository "${owner}/${repo}" not found or is private`);
         }
         
         // Fetch README
-        let readmeContent = await fetchFromGitHub(owner, repo, 'README.md');
-        if (!readmeContent) {
-            readmeContent = await fetchFromGitHub(owner, repo, 'README');
+        let readmeContent = '';
+        const readmeData = await fetchGitHubAPI(`https://api.github.com/repos/${owner}/${repo}/readme`);
+        if (readmeData && readmeData.content) {
+            readmeContent = atob(readmeData.content);
         }
         
         // Fetch LICENSE
         let hasLicense = false;
         let licenseContent = '';
-        const licenseContent_ = await fetchFromGitHub(owner, repo, 'LICENSE');
-        if (licenseContent_) {
+        const licenseData = await fetchGitHubAPI(`https://api.github.com/repos/${owner}/${repo}/contents/LICENSE`);
+        if (licenseData && licenseData.content) {
+            licenseContent = atob(licenseData.content);
             hasLicense = true;
-            licenseContent = licenseContent_;
         } else {
-            const licenseMdContent = await fetchFromGitHub(owner, repo, 'LICENSE.md');
-            if (licenseMdContent) {
+            const licenseMdData = await fetchGitHubAPI(`https://api.github.com/repos/${owner}/${repo}/contents/LICENSE.md`);
+            if (licenseMdData && licenseMdData.content) {
+                licenseContent = atob(licenseMdData.content);
                 hasLicense = true;
-                licenseContent = licenseMdContent;
             }
         }
         
-        // Fetch directory contents to check for tests
+        // Fetch contents to check for tests
         let hasTests = false;
         let testFiles = [];
-        const contents = await fetchDirectory(owner, repo);
-        if (Array.isArray(contents)) {
+        const contents = await fetchGitHubAPI(`https://api.github.com/repos/${owner}/${repo}/contents`);
+        if (contents && Array.isArray(contents)) {
             for (const item of contents) {
                 if (item.type === 'dir' && /test|tests?/i.test(item.name)) {
                     hasTests = true;
@@ -106,33 +88,43 @@ async function assessRepository(owner, repo) {
         // Check for CI files
         let hasCI = false;
         let ciType = null;
-        const ciFiles = [
+        const ciPaths = [
             '.github/workflows/ci.yml',
             '.github/workflows/test.yml',
+            '.github/workflows/main.yml',
             '.gitlab-ci.yml',
-            '.travis.yml'
+            '.travis.yml',
+            '.circleci/config.yml'
         ];
         
-        for (const ciFile of ciFiles) {
-            if (await pathExists(owner, repo, ciFile)) {
+        for (const ciPath of ciPaths) {
+            const ciData = await fetchGitHubAPI(`https://api.github.com/repos/${owner}/${repo}/contents/${ciPath}`);
+            if (ciData) {
                 hasCI = true;
-                ciType = ciFile.includes('github') ? 'GitHub Actions' : 
-                         ciFile.includes('gitlab') ? 'GitLab CI' : 'CI/CD';
+                if (ciPath.includes('github')) ciType = 'GitHub Actions';
+                else if (ciPath.includes('gitlab')) ciType = 'GitLab CI';
+                else if (ciPath.includes('travis')) ciType = 'Travis CI';
+                else if (ciPath.includes('circleci')) ciType = 'CircleCI';
                 break;
             }
         }
         
         // Check for CITATION.cff
-        const hasCitation = await pathExists(owner, repo, 'CITATION.cff');
+        let hasCitation = false;
+        const citationData = await fetchGitHubAPI(`https://api.github.com/repos/${owner}/${repo}/contents/CITATION.cff`);
+        if (citationData) hasCitation = true;
         
         // Fetch tags
-        const tags = await fetchTags(owner, repo);
+        let tags = [];
+        const tagsData = await fetchGitHubAPI(`https://api.github.com/repos/${owner}/${repo}/tags`);
+        if (tagsData && Array.isArray(tagsData)) tags = tagsData;
         
         // Check for code quality files
         let hasCodeQuality = false;
-        const qualityFiles = ['pyproject.toml', '.prettierrc', '.eslintrc', 'setup.py'];
-        for (const qFile of qualityFiles) {
-            if (await pathExists(owner, repo, qFile)) {
+        const qualityPaths = ['pyproject.toml', '.prettierrc', '.eslintrc', 'setup.py', 'package.json'];
+        for (const qPath of qualityPaths) {
+            const qData = await fetchGitHubAPI(`https://api.github.com/repos/${owner}/${repo}/contents/${qPath}`);
+            if (qData) {
                 hasCodeQuality = true;
                 break;
             }
@@ -457,6 +449,9 @@ function generateHTMLReport(assessment) {
         body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #E4E3E0; padding: 40px; }
         .container { max-width: 800px; margin: 0 auto; background: white; padding: 40px; border: 1px solid #141414; }
         h1 { text-transform: uppercase; border-bottom: 2px solid #141414; padding-bottom: 10px; }
+        .repo-info { margin: 15px 0; padding: 10px; background: #f5f5f5; border-radius: 8px; }
+        .repo-name { font-size: 18px; font-weight: bold; color: #667eea; }
+        .repo-link { color: #667eea; text-decoration: none; font-size: 14px; word-break: break-all; }
         .score-box { font-size: 48px; font-weight: bold; margin: 20px 0; }
         .summary { font-style: italic; margin-bottom: 30px; color: #444; }
         .check-item { border-bottom: 1px solid #eee; padding: 15px 0; }
@@ -470,3 +465,214 @@ function generateHTMLReport(assessment) {
         .fix-item.MEDIUM { border-left-color: #f59e0b; }
         .fix-item.LOW { border-left-color: #10b981; }
         .priority-high { color: #dc2626; font-weight: bold; }
+        .priority-medium { color: #f59e0b; font-weight: bold; }
+        .priority-low { color: #10b981; font-weight: bold; }
+        .footer { margin-top: 40px; font-size: 12px; opacity: 0.5; text-align: center; }
+    </style>
+</head>
+<body>
+<div class="container">
+    <h1>RepoReady Assessment Report</h1>
+    <div class="repo-info">
+        <div class="repo-name">📁 ${assessment.repository}</div>
+        <a href="${assessment.url}" class="repo-link" target="_blank">${assessment.url}</a>
+    </div>
+    <div class="score-box">Score: ${assessment.overallScore}/100</div>
+    <p class="summary">${assessment.summary}</p>
+    <h2>Detailed Assessment</h2>
+    ${assessment.checks.map(check => `
+        <div class="check-item">
+            <div class="check-header">
+                <span>${check.label}</span>
+                <span class="${check.passed ? 'status-passed' : 'status-failed'}">
+                    ${check.passed ? 'PASSED' : 'FAILED'} (${check.score}/${check.maxScore})
+                </span>
+            </div>
+            <div class="rationale">${check.rationale}</div>
+        </div>
+    `).join('')}
+    <div class="fix-list">
+        <h2>Priority Fixes</h2>
+        ${assessment.fixes.map(fix => `
+            <div class="fix-item ${fix.priority}">
+                <div class="priority-${fix.priority.toLowerCase()}">
+                    [${fix.impact}]
+                </div>
+                <div>${fix.task}</div>
+            </div>
+        `).join('')}
+    </div>
+    <div class="footer">Generated by RepoReady on ${assessment.timestamp}</div>
+</div>
+</body>
+</html>`;
+}
+
+function generateJSONReport(assessment) {
+    return JSON.stringify({
+        repository: assessment.repository,
+        url: assessment.url,
+        score: assessment.overallScore,
+        rating: assessment.rating,
+        summary: assessment.summary,
+        checks: assessment.checks,
+        fixChecklist: assessment.fixes.map(fix => ({
+            task: fix.task,
+            impact: fix.impact,
+            priority: fix.priority === 'HIGH' ? 3 : fix.priority === 'MEDIUM' ? 2 : 1
+        })),
+        generatedAt: assessment.timestamp
+    }, null, 2);
+}
+
+function renderResults(assessment) {
+    const resultDiv = document.getElementById('result');
+    
+    resultDiv.innerHTML = `
+        <div class="report-actions">
+            <button id="downloadHtmlBtn" class="report-btn download-btn">📄 Download HTML Report</button>
+            <button id="downloadJsonBtn" class="report-btn download-btn">💾 Download JSON Report</button>
+        </div>
+        <div class="score-card">
+            <div class="score-header">
+                <div class="score-label">OVERALL SCORE</div>
+                <div class="score-value">${assessment.overallScore}<span class="score-max">/100</span></div>
+                <div class="rating">${assessment.rating}</div>
+            </div>
+            <div class="summary">${assessment.summary}</div>
+        </div>
+        <div class="assessment-grid">
+            ${assessment.checks.map(check => `
+                <div class="assessment-card ${check.impact}-impact">
+                    <div class="card-header">
+                        <div class="card-title">${check.label}</div>
+                        <div class="card-score ${check.passed ? 'score-good' : 'score-low'}">${check.score}<span class="max">/${check.maxScore}</span></div>
+                    </div>
+                    <div class="card-impact ${check.impact}">${check.impact.toUpperCase()} IMPACT</div>
+                    <div class="card-reason">${check.rationale}</div>
+                </div>
+            `).join('')}
+        </div>
+        <div class="fixes-section">
+            <h2 class="section-title">🔧 PRIORITY FIX CHECKLIST</h2>
+            <div class="fixes-list">
+                ${assessment.fixes.map(fix => `
+                    <div class="fix-item ${fix.priority.toLowerCase()}">
+                        <div class="fix-header">
+                            <div class="fix-title">${fix.task}</div>
+                            <div class="fix-impact ${fix.priority.toLowerCase()}">${fix.priority} IMPACT</div>
+                        </div>
+                        <div class="fix-description">${fix.impact}</div>
+                    </div>
+                `).join('')}
+            </div>
+        </div>
+        <div class="info-footer">
+            <div class="timestamp">Report generated: ${assessment.timestamp}</div>
+            <div class="repo-info">Repository: ${assessment.repository}</div>
+        </div>
+    `;
+    
+    document.getElementById('downloadHtmlBtn').onclick = () => {
+        const html = generateHTMLReport(assessment);
+        const blob = new Blob([html], { type: 'text/html' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `repoready-${assessment.repository.replace('/', '-')}.html`;
+        a.click();
+        URL.revokeObjectURL(url);
+        showNotification('HTML report downloaded!');
+    };
+    
+    document.getElementById('downloadJsonBtn').onclick = () => {
+        const json = generateJSONReport(assessment);
+        const blob = new Blob([json], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `repoready-${assessment.repository.replace('/', '-')}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+        showNotification('JSON report downloaded!');
+    };
+}
+
+function showNotification(msg) {
+    const notification = document.createElement('div');
+    notification.className = 'notification';
+    notification.textContent = msg;
+    document.body.appendChild(notification);
+    setTimeout(() => notification.remove(), 3000);
+}
+
+function showError(msg) {
+    document.getElementById('result').innerHTML = `
+        <div class="error-card">
+            <h3>❌ Assessment Failed</h3>
+            <p>${msg}</p>
+            <p class="error-hint">Use format: owner/repo (e.g., facebook/react, tensorflow/tensorflow)</p>
+        </div>
+    `;
+}
+
+async function handleAssessment(input) {
+    if (!input) {
+        showError('Please enter a repository name');
+        return;
+    }
+    
+    let cleanInput = input.replace('https://github.com/', '').replace('.git', '').trim();
+    const parts = cleanInput.split('/');
+    
+    if (parts.length !== 2) {
+        showError('Invalid format. Use: owner/repo (e.g., facebook/react)');
+        return;
+    }
+    
+    const owner = parts[0];
+    const repo = parts[1];
+    
+    document.getElementById('loading').style.display = 'block';
+    document.getElementById('result').innerHTML = '';
+    document.getElementById('assessBtn').disabled = true;
+    
+    try {
+        const assessment = await assessRepository(owner, repo);
+        renderResults(assessment);
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(assessment));
+    } catch (err) {
+        showError(err.message || 'Failed to assess repository. Please check the name and try again.');
+    } finally {
+        document.getElementById('loading').style.display = 'none';
+        document.getElementById('assessBtn').disabled = false;
+    }
+}
+
+function loadLastAssessment() {
+    const last = localStorage.getItem(STORAGE_KEY);
+    if (last) {
+        try {
+            const assessment = JSON.parse(last);
+            renderResults(assessment);
+            document.getElementById('repoInput').value = assessment.repository;
+            showNotification('Last assessment loaded!');
+        } catch (e) {
+            showError('Failed to load last assessment');
+        }
+    } else {
+        showError('No previous assessment found');
+    }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    document.getElementById('assessBtn').onclick = () => {
+        handleAssessment(document.getElementById('repoInput').value.trim());
+    };
+    document.getElementById('repoInput').onkeypress = (e) => {
+        if (e.key === 'Enter') {
+            handleAssessment(e.target.value.trim());
+        }
+    };
+    document.getElementById('loadLastBtn').onclick = loadLastAssessment;
+});
