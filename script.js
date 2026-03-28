@@ -2,29 +2,53 @@
 const STORAGE_KEY = 'repoready_last_assessment';
 let currentAssessment = null;
 
+// Use a CORS proxy to avoid CORS issues
+const CORS_PROXY = 'https://api.allorigins.win/raw?url=';
+
+// Function to fetch with CORS proxy
+async function fetchWithProxy(url) {
+    try {
+        const proxyUrl = `${CORS_PROXY}${encodeURIComponent(url)}`;
+        const response = await fetch(proxyUrl);
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+        const data = await response.json();
+        return data;
+    } catch (error) {
+        console.error('Proxy fetch error:', error);
+        throw error;
+    }
+}
+
+// Function to fetch GitHub API directly (may have CORS issues in some environments)
+async function fetchGitHubAPI(url) {
+    try {
+        const response = await fetch(url);
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}`);
+        }
+        return await response.json();
+    } catch (error) {
+        // If direct fetch fails, try with proxy
+        console.log('Direct fetch failed, trying proxy...');
+        return await fetchWithProxy(url);
+    }
+}
+
 // Function to assess repository using GitHub API
 async function assessRepository(owner, repo) {
     const baseUrl = `https://api.github.com/repos/${owner}/${repo}`;
     
     try {
         // Fetch repository info
-        const repoInfoResponse = await fetch(baseUrl);
-        if (!repoInfoResponse.ok) {
-            if (repoInfoResponse.status === 403) {
-                throw new Error('GitHub API rate limit reached. Please try again later.');
-            } else if (repoInfoResponse.status === 404) {
-                throw new Error(`Repository "${owner}/${repo}" not found. Make sure it exists and is public.`);
-            } else {
-                throw new Error(`GitHub API error: ${repoInfoResponse.status}`);
-            }
-        }
+        const repoInfo = await fetchGitHubAPI(baseUrl);
         
         // Fetch README
         let readmeContent = '';
         try {
-            const readmeResponse = await fetch(`${baseUrl}/readme`);
-            if (readmeResponse.ok) {
-                const readmeData = await readmeResponse.json();
+            const readmeData = await fetchGitHubAPI(`${baseUrl}/readme`);
+            if (readmeData && readmeData.content) {
                 readmeContent = atob(readmeData.content);
             }
         } catch (e) {}
@@ -33,51 +57,47 @@ async function assessRepository(owner, repo) {
         let licenseContent = '';
         let hasLicense = false;
         try {
-            const licenseResponse = await fetch(`${baseUrl}/contents/LICENSE`);
-            if (licenseResponse.ok) {
-                const licenseData = await licenseResponse.json();
+            const licenseData = await fetchGitHubAPI(`${baseUrl}/contents/LICENSE`);
+            if (licenseData && licenseData.content) {
                 licenseContent = atob(licenseData.content);
                 hasLicense = true;
-            } else {
-                const licenseMdResponse = await fetch(`${baseUrl}/contents/LICENSE.md`);
-                if (licenseMdResponse.ok) {
-                    const licenseData = await licenseMdResponse.json();
-                    licenseContent = atob(licenseData.content);
+            }
+        } catch (e) {
+            try {
+                const licenseMdData = await fetchGitHubAPI(`${baseUrl}/contents/LICENSE.md`);
+                if (licenseMdData && licenseMdData.content) {
+                    licenseContent = atob(licenseMdData.content);
                     hasLicense = true;
                 }
-            }
-        } catch (e) {}
+            } catch (e2) {}
+        }
         
         // Fetch package.json
         let packageJsonData = null;
         try {
-            const packageResponse = await fetch(`${baseUrl}/contents/package.json`);
-            if (packageResponse.ok) {
-                const packageData = await packageResponse.json();
+            const packageData = await fetchGitHubAPI(`${baseUrl}/contents/package.json`);
+            if (packageData && packageData.content) {
                 const packageContent = atob(packageData.content);
                 packageJsonData = JSON.parse(packageContent);
             }
         } catch (e) {}
         
-        // Check for tests
+        // Fetch repository contents
         let hasTests = false;
         let testFiles = [];
         try {
-            const contentsResponse = await fetch(`${baseUrl}/contents`);
-            if (contentsResponse.ok) {
-                const contents = await contentsResponse.json();
-                if (Array.isArray(contents)) {
-                    contents.forEach(item => {
-                        if (item.type === 'dir' && /test|tests?/i.test(item.name)) {
-                            hasTests = true;
-                            testFiles.push(item.name);
-                        }
-                        if (item.type === 'file' && /test|spec/i.test(item.name)) {
-                            hasTests = true;
-                            testFiles.push(item.name);
-                        }
-                    });
-                }
+            const contents = await fetchGitHubAPI(`${baseUrl}/contents`);
+            if (Array.isArray(contents)) {
+                contents.forEach(item => {
+                    if (item.type === 'dir' && /test|tests?/i.test(item.name)) {
+                        hasTests = true;
+                        testFiles.push(item.name);
+                    }
+                    if (item.type === 'file' && /test|spec/i.test(item.name)) {
+                        hasTests = true;
+                        testFiles.push(item.name);
+                    }
+                });
             }
         } catch (e) {}
         
@@ -95,8 +115,8 @@ async function assessRepository(owner, repo) {
         
         for (const ciPath of ciPaths) {
             try {
-                const ciResponse = await fetch(`${baseUrl}/contents/${ciPath}`);
-                if (ciResponse.ok) {
+                const ciData = await fetchGitHubAPI(`${baseUrl}/contents/${ciPath}`);
+                if (ciData) {
                     hasCI = true;
                     if (ciPath.includes('github')) ciType = 'GitHub Actions';
                     else if (ciPath.includes('gitlab')) ciType = 'GitLab CI';
@@ -110,17 +130,15 @@ async function assessRepository(owner, repo) {
         // Check for CITATION
         let hasCitation = false;
         try {
-            const citationResponse = await fetch(`${baseUrl}/contents/CITATION.cff`);
-            if (citationResponse.ok) hasCitation = true;
+            const citationData = await fetchGitHubAPI(`${baseUrl}/contents/CITATION.cff`);
+            if (citationData) hasCitation = true;
         } catch (e) {}
         
         // Fetch tags
         let tags = [];
         try {
-            const tagsResponse = await fetch(`${baseUrl}/tags`);
-            if (tagsResponse.ok) {
-                tags = await tagsResponse.json();
-            }
+            tags = await fetchGitHubAPI(`${baseUrl}/tags`);
+            if (!Array.isArray(tags)) tags = [];
         } catch (e) {}
         
         // Check for code quality
@@ -129,8 +147,8 @@ async function assessRepository(owner, repo) {
         const qualityPaths = ['pyproject.toml', '.prettierrc', '.eslintrc', '.stylelintrc', 'setup.py'];
         for (const qPath of qualityPaths) {
             try {
-                const qResponse = await fetch(`${baseUrl}/contents/${qPath}`);
-                if (qResponse.ok) {
+                const qData = await fetchGitHubAPI(`${baseUrl}/contents/${qPath}`);
+                if (qData) {
                     hasCodeQuality = true;
                     qualityDetails.push(qPath);
                 }
@@ -150,7 +168,7 @@ async function assessRepository(owner, repo) {
         const totalScore = readmeEval.score + licenseEval.score + testsEval.score + 
                           ciEval.score + versioningEval.score + citationEval.score + codeQualityEval.score;
         
-        // Generate fixes checklist with ALL priorities
+        // Generate fixes checklist
         const fixes = [];
         
         // HIGH PRIORITY FIXES
@@ -258,7 +276,7 @@ async function assessRepository(owner, repo) {
             });
         }
         
-        // Sort fixes by priority (HIGH → MEDIUM → LOW)
+        // Sort fixes by priority
         fixes.sort((a, b) => b.priorityLevel - a.priorityLevel);
         
         // Build checks array
@@ -343,7 +361,7 @@ async function assessRepository(owner, repo) {
         
     } catch (error) {
         console.error('Assessment error:', error);
-        throw error;
+        throw new Error(`Failed to fetch repository: ${error.message}`);
     }
 }
 
@@ -813,7 +831,6 @@ function renderResults(assessment) {
     resultDiv.innerHTML = html;
     resultDiv.scrollIntoView({ behavior: 'smooth', block: 'start' });
     
-    // Add event listeners for download buttons
     setTimeout(() => {
         const htmlBtn = document.getElementById('downloadHtmlBtn');
         const jsonBtn = document.getElementById('downloadJsonBtn');
