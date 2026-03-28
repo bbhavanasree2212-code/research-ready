@@ -2,22 +2,48 @@
 const STORAGE_KEY = 'repoready_last_assessment';
 let currentAssessment = null;
 
+// Helper function to make GitHub API requests with token
+async function githubFetch(url, token = null) {
+    const headers = {};
+    if (token) {
+        headers['Authorization'] = `token ${token}`;
+    }
+    
+    const response = await fetch(url, { headers });
+    
+    if (response.status === 403) {
+        const rateLimitRemaining = response.headers.get('X-RateLimit-Remaining');
+        if (rateLimitRemaining === '0') {
+            throw new Error('GitHub API rate limit exceeded. Please add a GitHub token or try again later.');
+        }
+    }
+    
+    return response;
+}
+
 // Function to assess repository using GitHub API
 async function assessRepository(owner, repo) {
+    const token = document.getElementById('githubToken')?.value || null;
     const baseUrl = `https://api.github.com/repos/${owner}/${repo}`;
     
     try {
-        // Fetch repository info
-        const repoInfoResponse = await fetch(baseUrl);
+        // Fetch repository info with token
+        const repoInfoResponse = await githubFetch(baseUrl, token);
         if (!repoInfoResponse.ok) {
-            throw new Error(`Repository not found: ${repoInfoResponse.status}`);
+            if (repoInfoResponse.status === 403) {
+                throw new Error('GitHub API rate limit reached. Please add a GitHub token in the optional section above.');
+            } else if (repoInfoResponse.status === 404) {
+                throw new Error(`Repository "${owner}/${repo}" not found. Make sure it exists and is public.`);
+            } else {
+                throw new Error(`GitHub API error: ${repoInfoResponse.status}`);
+            }
         }
         const repoInfo = await repoInfoResponse.json();
         
         // Fetch README
         let readmeContent = '';
         try {
-            const readmeResponse = await fetch(`${baseUrl}/readme`);
+            const readmeResponse = await githubFetch(`${baseUrl}/readme`, token);
             if (readmeResponse.ok) {
                 const readmeData = await readmeResponse.json();
                 readmeContent = atob(readmeData.content);
@@ -30,28 +56,28 @@ async function assessRepository(owner, repo) {
         let licenseContent = '';
         let hasLicense = false;
         try {
-            const licenseResponse = await fetch(`${baseUrl}/contents/LICENSE`);
+            const licenseResponse = await githubFetch(`${baseUrl}/contents/LICENSE`, token);
             if (licenseResponse.ok) {
                 const licenseData = await licenseResponse.json();
                 licenseContent = atob(licenseData.content);
                 hasLicense = true;
-            }
-        } catch (e) {
-            // Try LICENSE.md
-            try {
-                const licenseResponse = await fetch(`${baseUrl}/contents/LICENSE.md`);
-                if (licenseResponse.ok) {
-                    const licenseData = await licenseResponse.json();
+            } else {
+                // Try LICENSE.md
+                const licenseMdResponse = await githubFetch(`${baseUrl}/contents/LICENSE.md`, token);
+                if (licenseMdResponse.ok) {
+                    const licenseData = await licenseMdResponse.json();
                     licenseContent = atob(licenseData.content);
                     hasLicense = true;
                 }
-            } catch (e2) {}
+            }
+        } catch (e) {
+            console.log('No LICENSE found');
         }
         
         // Fetch package.json if exists
         let packageJsonData = null;
         try {
-            const packageResponse = await fetch(`${baseUrl}/contents/package.json`);
+            const packageResponse = await githubFetch(`${baseUrl}/contents/package.json`, token);
             if (packageResponse.ok) {
                 const packageData = await packageResponse.json();
                 const packageContent = atob(packageData.content);
@@ -65,19 +91,21 @@ async function assessRepository(owner, repo) {
         let hasTests = false;
         let testFiles = [];
         try {
-            const contentsResponse = await fetch(`${baseUrl}/contents`);
+            const contentsResponse = await githubFetch(`${baseUrl}/contents`, token);
             if (contentsResponse.ok) {
                 const contents = await contentsResponse.json();
-                contents.forEach(item => {
-                    if (item.type === 'dir' && /test|tests?/i.test(item.name)) {
-                        hasTests = true;
-                        testFiles.push(item.name);
-                    }
-                    if (item.type === 'file' && /test|spec/i.test(item.name)) {
-                        hasTests = true;
-                        testFiles.push(item.name);
-                    }
-                });
+                if (Array.isArray(contents)) {
+                    contents.forEach(item => {
+                        if (item.type === 'dir' && /test|tests?/i.test(item.name)) {
+                            hasTests = true;
+                            testFiles.push(item.name);
+                        }
+                        if (item.type === 'file' && /test|spec/i.test(item.name)) {
+                            hasTests = true;
+                            testFiles.push(item.name);
+                        }
+                    });
+                }
             }
         } catch (e) {
             console.log('Could not fetch contents');
@@ -97,7 +125,7 @@ async function assessRepository(owner, repo) {
         
         for (const ciPath of ciPaths) {
             try {
-                const ciResponse = await fetch(`${baseUrl}/contents/${ciPath}`);
+                const ciResponse = await githubFetch(`${baseUrl}/contents/${ciPath}`, token);
                 if (ciResponse.ok) {
                     hasCI = true;
                     if (ciPath.includes('github')) ciType = 'GitHub Actions';
@@ -112,14 +140,14 @@ async function assessRepository(owner, repo) {
         // Check for CITATION.cff
         let hasCitation = false;
         try {
-            const citationResponse = await fetch(`${baseUrl}/contents/CITATION.cff`);
+            const citationResponse = await githubFetch(`${baseUrl}/contents/CITATION.cff`, token);
             if (citationResponse.ok) hasCitation = true;
         } catch (e) {}
         
         // Fetch tags/releases
         let tags = [];
         try {
-            const tagsResponse = await fetch(`${baseUrl}/tags`);
+            const tagsResponse = await githubFetch(`${baseUrl}/tags`, token);
             if (tagsResponse.ok) {
                 tags = await tagsResponse.json();
             }
@@ -131,7 +159,7 @@ async function assessRepository(owner, repo) {
         const qualityPaths = ['pyproject.toml', '.prettierrc', '.eslintrc', '.stylelintrc', 'setup.py'];
         for (const qPath of qualityPaths) {
             try {
-                const qResponse = await fetch(`${baseUrl}/contents/${qPath}`);
+                const qResponse = await githubFetch(`${baseUrl}/contents/${qPath}`, token);
                 if (qResponse.ok) {
                     hasCodeQuality = true;
                     qualityDetails.push(qPath);
@@ -146,17 +174,16 @@ async function assessRepository(owner, repo) {
         const ciEval = evaluateCI(hasCI, ciType);
         const versioningEval = evaluateVersioning(tags);
         const citationEval = evaluateCitation(hasCitation, readmeContent);
-        const codeQualityEval = evaluateCodeQuality(hasCodeQuality, qualityDetails);
         
         // Calculate total score
         const totalScore = readmeEval.score + licenseEval.score + testsEval.score + 
                           ciEval.score + versioningEval.score + citationEval.score;
         
-        // Generate fixes checklist with ALL priorities (HIGH, MEDIUM, LOW)
+        // Generate fixes checklist
         const fixes = [];
         
         // HIGH IMPACT FIXES
-        if (licenseEval.score === 0) {
+        if (licenseEval.score < 20) {
             fixes.push({
                 icon: '❌',
                 title: 'Add a LICENSE file to the root directory',
@@ -165,39 +192,32 @@ async function assessRepository(owner, repo) {
                 priority: 'high',
                 suggestion: 'Add MIT, Apache-2.0, or GPL-3.0 license file'
             });
-        } else if (licenseEval.score < 15) {
-            fixes.push({
-                icon: '⚠️',
-                title: 'Update to standard open-source license',
-                description: 'Current license may not be suitable for open-source research use',
-                impact: 'HIGH IMPACT',
-                priority: 'high',
-                suggestion: 'Switch to MIT, Apache-2.0, or GPL-3.0 license'
-            });
         }
         
-        if (testsEval.score === 0) {
-            fixes.push({
-                icon: '❌',
-                title: 'Implement a basic test suite and tests directory',
-                description: 'HIGH: ENSURES SCIENTIFIC INTEGRITY AND PREVENTS REGRESSIONS',
-                impact: 'HIGH IMPACT',
-                priority: 'high',
-                suggestion: 'Add unit tests using pytest, jest, or your language\'s testing framework'
-            });
-        } else if (testsEval.score < 15) {
-            fixes.push({
-                icon: '⚠️',
-                title: 'Expand test coverage',
-                description: 'MEDIUM: CURRENT TESTS ARE LIMITED',
-                impact: 'MEDIUM IMPACT',
-                priority: 'medium',
-                suggestion: 'Add more comprehensive test cases to improve coverage'
-            });
+        if (testsEval.score < 20) {
+            if (testsEval.score === 0) {
+                fixes.push({
+                    icon: '❌',
+                    title: 'Implement a basic test suite and tests directory',
+                    description: 'HIGH: ENSURES SCIENTIFIC INTEGRITY AND PREVENTS REGRESSIONS',
+                    impact: 'HIGH IMPACT',
+                    priority: 'high',
+                    suggestion: 'Add unit tests using pytest, jest, or your language\'s testing framework'
+                });
+            } else {
+                fixes.push({
+                    icon: '⚠️',
+                    title: 'Expand test coverage',
+                    description: 'MEDIUM: CURRENT TESTS ARE LIMITED',
+                    impact: 'MEDIUM IMPACT',
+                    priority: 'medium',
+                    suggestion: 'Add more comprehensive test cases to improve coverage'
+                });
+            }
         }
         
         // MEDIUM IMPACT FIXES
-        if (ciEval.score === 0) {
+        if (ciEval.score < 15) {
             fixes.push({
                 icon: '🔘',
                 title: 'Configure GitHub Actions to automate tests',
@@ -208,64 +228,70 @@ async function assessRepository(owner, repo) {
             });
         }
         
-        if (citationEval.score === 0) {
-            fixes.push({
-                icon: '📄',
-                title: 'Create a CITATION.cff file',
-                description: 'MEDIUM: IMPROVES ACADEMIC IMPACT TRACKING',
-                impact: 'MEDIUM IMPACT',
-                priority: 'medium',
-                suggestion: 'Add CITATION.cff with authors, title, and DOI if available'
-            });
-        } else if (citationEval.score < 8) {
-            fixes.push({
-                icon: '📝',
-                title: 'Improve citation information',
-                description: 'LOW: CURRENT CITATION INFO IS INCOMPLETE',
-                impact: 'LOW IMPACT',
-                priority: 'low',
-                suggestion: 'Convert README citation info to CITATION.cff format'
-            });
+        if (citationEval.score < 10) {
+            if (citationEval.score === 0) {
+                fixes.push({
+                    icon: '📄',
+                    title: 'Create a CITATION.cff file',
+                    description: 'MEDIUM: IMPROVES ACADEMIC IMPACT TRACKING',
+                    impact: 'MEDIUM IMPACT',
+                    priority: 'medium',
+                    suggestion: 'Add CITATION.cff with authors, title, and DOI if available'
+                });
+            } else {
+                fixes.push({
+                    icon: '📝',
+                    title: 'Improve citation information',
+                    description: 'LOW: CURRENT CITATION INFO IS INCOMPLETE',
+                    impact: 'LOW IMPACT',
+                    priority: 'low',
+                    suggestion: 'Convert README citation info to CITATION.cff format'
+                });
+            }
         }
         
-        if (readmeEval.score < 20) {
-            fixes.push({
-                icon: '📖',
-                title: 'Enhance README documentation',
-                description: 'MEDIUM: IMPROVES ONSET AND USABILITY',
-                impact: 'MEDIUM IMPACT',
-                priority: 'medium',
-                suggestion: 'Add installation, usage examples, and API documentation'
-            });
-        } else if (readmeEval.score < 25) {
-            fixes.push({
-                icon: '📝',
-                title: 'Add more details to README',
-                description: 'LOW: MISSING SOME DOCUMENTATION SECTIONS',
-                impact: 'LOW IMPACT',
-                priority: 'low',
-                suggestion: 'Add structure overview and documentation links'
-            });
+        if (readmeEval.score < 25) {
+            if (readmeEval.score < 20) {
+                fixes.push({
+                    icon: '📖',
+                    title: 'Enhance README documentation',
+                    description: 'MEDIUM: IMPROVES ONSET AND USABILITY',
+                    impact: 'MEDIUM IMPACT',
+                    priority: 'medium',
+                    suggestion: 'Add installation, usage examples, and API documentation'
+                });
+            } else {
+                fixes.push({
+                    icon: '📝',
+                    title: 'Add more details to README',
+                    description: 'LOW: MISSING SOME DOCUMENTATION SECTIONS',
+                    impact: 'LOW IMPACT',
+                    priority: 'low',
+                    suggestion: 'Add structure overview and documentation links'
+                });
+            }
         }
         
-        if (versioningEval.score === 0) {
-            fixes.push({
-                icon: '🏷️',
-                title: 'Create version tags for releases',
-                description: 'MEDIUM: IMPORTANT FOR REPRODUCIBILITY',
-                impact: 'MEDIUM IMPACT',
-                priority: 'medium',
-                suggestion: 'Create semantic version tags (v1.0.0, v1.0.1, etc.)'
-            });
-        } else if (versioningEval.score < 8) {
-            fixes.push({
-                icon: '🏷️',
-                title: 'Adopt semantic versioning',
-                description: 'LOW: CURRENT TAGS NOT FOLLOWING SEMVER',
-                impact: 'LOW IMPACT',
-                priority: 'low',
-                suggestion: 'Use semantic versioning format: v1.0.0, v1.0.1, etc.'
-            });
+        if (versioningEval.score < 10) {
+            if (versioningEval.score === 0) {
+                fixes.push({
+                    icon: '🏷️',
+                    title: 'Create version tags for releases',
+                    description: 'MEDIUM: IMPORTANT FOR REPRODUCIBILITY',
+                    impact: 'MEDIUM IMPACT',
+                    priority: 'medium',
+                    suggestion: 'Create semantic version tags (v1.0.0, v1.0.1, etc.)'
+                });
+            } else {
+                fixes.push({
+                    icon: '🏷️',
+                    title: 'Adopt semantic versioning',
+                    description: 'LOW: CURRENT TAGS NOT FOLLOWING SEMVER',
+                    impact: 'LOW IMPACT',
+                    priority: 'low',
+                    suggestion: 'Use semantic versioning format: v1.0.0, v1.0.1, etc.'
+                });
+            }
         }
         
         // LOW IMPACT FIXES
@@ -490,22 +516,6 @@ function evaluateCitation(hasCitationFile, readmeContent) {
     };
 }
 
-function evaluateCodeQuality(hasConfig, details) {
-    if (!hasConfig) {
-        return {
-            score: 0,
-            reason: 'No explicit formatting configurations (like Black, Prettier, or ESLint) were found.',
-            details: []
-        };
-    }
-    
-    return {
-        score: 15,
-        reason: `Code formatting configurations detected: ${details.join(', ')}. This improves code readability and maintainability.`,
-        details: details
-    };
-}
-
 function getRating(score) {
     if (score >= 85) return 'EXCELLENT - Research Software Ready';
     if (score >= 70) return 'GOOD - Mostly Ready';
@@ -588,7 +598,6 @@ function renderResults(assessment) {
         <div class="assessment-grid">
             ${Object.entries(assessment.checks).map(([key, check]) => {
                 const impactClass = check.impact.toLowerCase().replace(' ', '-');
-                // Determine if score is below threshold (should be red)
                 const isBelowThreshold = check.score < check.threshold;
                 const scoreClass = isBelowThreshold ? 'score-low' : 'score-good';
                 return `
@@ -634,7 +643,6 @@ function renderResults(assessment) {
     resultDiv.innerHTML = html;
     resultDiv.scrollIntoView({ behavior: 'smooth', block: 'start' });
     
-    // Add event listeners for download buttons
     setTimeout(() => {
         document.getElementById('downloadHtmlBtn')?.addEventListener('click', () => downloadHTMLReport(assessment));
         document.getElementById('downloadJsonBtn')?.addEventListener('click', () => downloadJSONReport(assessment));
@@ -836,136 +844,4 @@ function showNotification(message, type) {
         background: ${type === 'success' ? '#48bb78' : '#f56565'};
         color: white;
         font-weight: 500;
-        z-index: 10000;
-        animation: slideIn 0.3s ease-out;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-    `;
-    document.body.appendChild(notification);
-    
-    setTimeout(() => notification.remove(), 3000);
-}
-
-function showError(message) {
-    const resultDiv = document.getElementById('result');
-    resultDiv.innerHTML = `
-        <div class="error-card">
-            <h3>❌ Assessment Failed</h3>
-            <p>${message}</p>
-            <p class="error-hint">Make sure the repository is public and the URL is correct.</p>
-        </div>
-    `;
-}
-
-function showLoading() {
-    document.getElementById('loading').style.display = 'block';
-    document.getElementById('result').innerHTML = '';
-    const assessBtn = document.getElementById('assessBtn');
-    if (assessBtn) assessBtn.disabled = true;
-}
-
-function hideLoading() {
-    document.getElementById('loading').style.display = 'none';
-    const assessBtn = document.getElementById('assessBtn');
-    if (assessBtn) assessBtn.disabled = false;
-}
-
-async function handleAssessment(input) {
-    if (!input) {
-        showError('Please enter a repository URL or owner/repo name');
-        return;
-    }
-    
-    // Parse input (supports both full URL and owner/repo format)
-    let owner, repo;
-    
-    if (input.includes('github.com')) {
-        const match = input.match(/github\.com\/([^\/]+)\/([^\/]+)/);
-        if (match) {
-            owner = match[1];
-            repo = match[2].replace('.git', '');
-        }
-    } else {
-        const parts = input.split('/');
-        if (parts.length === 2) {
-            owner = parts[0];
-            repo = parts[1];
-        }
-    }
-    
-    if (!owner || !repo) {
-        showError('Invalid repository format. Use "owner/repo" or full GitHub URL');
-        return;
-    }
-    
-    showLoading();
-    
-    try {
-        const assessment = await assessRepository(owner, repo);
-        renderResults(assessment);
-        // Save to localStorage
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(assessment));
-    } catch (error) {
-        console.error('Error:', error);
-        showError(error.message || 'Failed to assess repository. Please try again.');
-    } finally {
-        hideLoading();
-    }
-}
-
-function loadLastAssessment() {
-    const last = localStorage.getItem(STORAGE_KEY);
-    if (last) {
-        try {
-            const assessment = JSON.parse(last);
-            renderResults(assessment);
-            const repoInput = document.getElementById('repoInput');
-            if (repoInput) repoInput.value = assessment.repository;
-            showNotification('Last assessment loaded!', 'success');
-        } catch (e) {
-            showError('Failed to load last assessment');
-        }
-    } else {
-        showError('No previous assessment found');
-    }
-}
-
-// Initialize event listeners when DOM is ready
-document.addEventListener('DOMContentLoaded', () => {
-    console.log('RepoReady initialized');
-    
-    const assessBtn = document.getElementById('assessBtn');
-    const repoInput = document.getElementById('repoInput');
-    const loadLastBtn = document.getElementById('loadLastBtn');
-    const demoBtns = document.querySelectorAll('.demo-btn:not(#loadLastBtn)');
-    
-    if (assessBtn) {
-        assessBtn.addEventListener('click', () => {
-            const input = repoInput ? repoInput.value.trim() : '';
-            handleAssessment(input);
-        });
-    }
-    
-    if (repoInput) {
-        repoInput.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') {
-                handleAssessment(repoInput.value.trim());
-            }
-        });
-    }
-    
-    if (loadLastBtn) {
-        loadLastBtn.addEventListener('click', loadLastAssessment);
-    }
-    
-    demoBtns.forEach(btn => {
-        btn.addEventListener('click', () => {
-            const repoUrl = btn.getAttribute('data-repo');
-            if (repoUrl) {
-                if (repoInput) repoInput.value = repoUrl;
-                handleAssessment(repoUrl);
-            }
-        });
-    });
-    
-    console.log('Event listeners attached');
-});
+        z
