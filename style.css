@@ -1,4 +1,263 @@
-/* Add these styles to your existing style.css */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    min-height: 100vh;
+    padding: 40px 20px;
+}
+
+.container {
+    max-width: 1200px;
+    margin: 0 auto;
+}
+
+/* Header Styles */
+.header {
+    text-align: center;
+    margin-bottom: 48px;
+}
+
+.logo {
+    font-size: 64px;
+    font-weight: 800;
+    color: white;
+    margin-bottom: 16px;
+    text-shadow: 0 2px 10px rgba(0,0,0,0.2);
+    letter-spacing: -1px;
+}
+
+.badge {
+    display: inline-flex;
+    gap: 16px;
+    background: rgba(255,255,255,0.2);
+    backdrop-filter: blur(10px);
+    padding: 8px 24px;
+    border-radius: 40px;
+    font-size: 14px;
+    font-weight: 500;
+    color: white;
+    margin-bottom: 20px;
+}
+
+.tagline {
+    font-size: 18px;
+    color: rgba(255,255,255,0.9);
+}
+
+/* Main Assessment Card */
+.assessment-card-main {
+    background: white;
+    border-radius: 24px;
+    padding: 48px;
+    box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+    margin-bottom: 32px;
+}
+
+.input-label {
+    text-align: center;
+    font-size: 12px;
+    letter-spacing: 2px;
+    color: #a0aec0;
+    margin-bottom: 24px;
+    font-weight: 600;
+}
+
+.url-input-group {
+    display: flex;
+    align-items: center;
+    background: #f7fafc;
+    border: 2px solid #e2e8f0;
+    border-radius: 16px;
+    padding: 4px;
+    margin-bottom: 32px;
+    transition: all 0.3s;
+}
+
+.url-input-group:focus-within {
+    border-color: #667eea;
+    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+
+.url-prefix {
+    padding: 12px 16px;
+    background: #edf2f7;
+    border-radius: 12px;
+    color: #4a5568;
+    font-size: 14px;
+    font-weight: 500;
+}
+
+.repo-input {
+    flex: 1;
+    padding: 12px 16px;
+    font-size: 16px;
+    border: none;
+    background: transparent;
+    outline: none;
+    color: #2d3748;
+}
+
+.repo-input::placeholder {
+    color: #cbd5e0;
+}
+
+.assess-btn {
+    padding: 12px 32px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    border: none;
+    border-radius: 12px;
+    font-size: 16px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.3s;
+}
+
+.assess-btn:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+}
+
+.assess-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.demo-section {
+    border-top: 1px solid #e2e8f0;
+    padding-top: 24px;
+}
+
+.demo-label {
+    font-size: 14px;
+    color: #718096;
+    margin-bottom: 12px;
+    font-weight: 500;
+}
+
+.demo-buttons {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.demo-btn {
+    background: #f7fafc;
+    border: 1px solid #e2e8f0;
+    padding: 8px 20px;
+    border-radius: 10px;
+    font-size: 14px;
+    cursor: pointer;
+    transition: all 0.2s;
+    color: #4a5568;
+    font-weight: 500;
+}
+
+.demo-btn:hover {
+    background: #edf2f7;
+    border-color: #667eea;
+    color: #667eea;
+}
+
+/* Loading State */
+.loading {
+    text-align: center;
+    padding: 60px;
+    background: white;
+    border-radius: 24px;
+    margin-top: 32px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+}
+
+.spinner {
+    width: 60px;
+    height: 60px;
+    border: 4px solid #e2e8f0;
+    border-top-color: #667eea;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin: 0 auto 20px;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+.loading p {
+    color: #4a5568;
+    font-size: 16px;
+    margin-top: 16px;
+}
+
+.loading-subtitle {
+    font-size: 14px;
+    color: #a0aec0;
+    margin-top: 8px;
+}
+
+/* Results Container */
+.result-container {
+    margin-top: 32px;
+}
+
+/* Score Card */
+.score-card {
+    background: white;
+    border-radius: 24px;
+    padding: 40px;
+    margin-bottom: 32px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.1);
+}
+
+.score-header {
+    text-align: center;
+    margin-bottom: 32px;
+}
+
+.score-label {
+    font-size: 14px;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    color: #a0aec0;
+    margin-bottom: 16px;
+    font-weight: 600;
+}
+
+.score-value {
+    font-size: 80px;
+    font-weight: 800;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    line-height: 1;
+}
+
+.score-max {
+    font-size: 24px;
+    color: #cbd5e0;
+    font-weight: 500;
+}
+
+.rating {
+    font-size: 18px;
+    color: #48bb78;
+    margin-top: 12px;
+    font-weight: 600;
+}
+
+.summary {
+    color: #4a5568;
+    line-height: 1.6;
+    margin-top: 24px;
+    padding-top: 24px;
+    border-top: 1px solid #e2e8f0;
+}
 
 /* Report Actions */
 .report-actions {
@@ -10,7 +269,7 @@
 }
 
 .report-btn {
-    padding: 12px 24px;
+    padding: 12px 28px;
     border: none;
     border-radius: 12px;
     font-size: 14px;
@@ -33,25 +292,210 @@
 }
 
 .copy-btn {
-    background: rgba(102, 126, 234, 0.2);
+    background: #f7fafc;
     color: #667eea;
-    border: 1px solid rgba(102, 126, 234, 0.3);
+    border: 1px solid #e2e8f0;
 }
 
 .copy-btn:hover {
-    background: rgba(102, 126, 234, 0.3);
+    background: #edf2f7;
     transform: translateY(-2px);
+}
+
+/* Assessment Grid */
+.assessment-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+    gap: 24px;
+    margin-bottom: 48px;
+}
+
+.assessment-card {
+    background: #f7fafc;
+    border-radius: 20px;
+    padding: 24px;
+    border-left: 4px solid;
+    transition: transform 0.2s;
+}
+
+.assessment-card:hover {
+    transform: translateY(-4px);
+}
+
+.assessment-card.high-impact {
+    border-left-color: #f56565;
+}
+
+.assessment-card.medium-impact {
+    border-left-color: #ed8936;
+}
+
+.assessment-card.low-impact {
+    border-left-color: #48bb78;
+}
+
+.card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.card-title {
+    font-size: 18px;
+    font-weight: 600;
+    color: #2d3748;
+}
+
+.card-score {
+    font-size: 28px;
+    font-weight: 700;
+    color: #667eea;
+}
+
+.card-score .max {
+    font-size: 14px;
+    color: #a0aec0;
+    font-weight: 400;
+}
+
+.card-impact {
+    font-size: 12px;
+    font-weight: 600;
+    margin-bottom: 16px;
+    padding: 4px 0;
+}
+
+.card-impact.high {
+    color: #f56565;
+}
+
+.card-impact.medium {
+    color: #ed8936;
+}
+
+.card-impact.low {
+    color: #48bb78;
+}
+
+.card-reason {
+    font-size: 14px;
+    color: #718096;
+    line-height: 1.5;
+}
+
+/* Fixes Section */
+.fixes-section {
+    background: #f7fafc;
+    border-radius: 24px;
+    padding: 32px;
+    margin-bottom: 32px;
+}
+
+.section-title {
+    font-size: 24px;
+    font-weight: 700;
+    margin-bottom: 24px;
+    color: #2d3748;
+}
+
+.fixes-list {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.fix-item {
+    background: white;
+    border-radius: 16px;
+    padding: 20px;
+    border-left: 4px solid;
+    transition: transform 0.2s;
+}
+
+.fix-item:hover {
+    transform: translateX(4px);
+}
+
+.fix-item.high {
+    border-left-color: #f56565;
+}
+
+.fix-item.medium {
+    border-left-color: #ed8936;
+}
+
+.fix-item.low {
+    border-left-color: #48bb78;
+}
+
+.fix-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 12px;
+    flex-wrap: wrap;
+}
+
+.fix-icon {
+    font-size: 24px;
+}
+
+.fix-title {
+    font-size: 16px;
+    font-weight: 600;
+    color: #2d3748;
+    flex: 1;
+}
+
+.fix-impact {
+    font-size: 12px;
+    font-weight: 600;
+    padding: 4px 10px;
+    border-radius: 20px;
+    background: #f7fafc;
+}
+
+.fix-impact.high {
+    color: #f56565;
+    background: #fff5f5;
+}
+
+.fix-impact.medium {
+    color: #ed8936;
+    background: #fffaf0;
+}
+
+.fix-impact.low {
+    color: #48bb78;
+    background: #f0fff4;
+}
+
+.fix-description {
+    font-size: 13px;
+    color: #718096;
+    margin-bottom: 12px;
+    padding-left: 36px;
+}
+
+.fix-suggestion {
+    font-size: 13px;
+    color: #667eea;
+    padding-left: 36px;
+    font-weight: 500;
 }
 
 /* Info Footer */
 .info-footer {
-    background: #0f1119;
+    background: #f7fafc;
     border-radius: 16px;
     padding: 20px;
     margin-top: 24px;
     text-align: center;
     font-size: 12px;
-    color: #718096;
+    color: #a0aec0;
 }
 
 .timestamp {
@@ -61,36 +505,117 @@
 .repo-info {
     font-family: monospace;
     font-size: 12px;
+    color: #718096;
 }
 
-/* Enhanced Error Card */
+/* Error Card */
 .error-card {
-    background: #1a1f2e;
+    background: white;
     border-radius: 24px;
-    padding: 40px;
+    padding: 48px;
     text-align: center;
     border-left: 4px solid #f56565;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.1);
 }
 
 .error-card h3 {
     color: #f56565;
-    margin-bottom: 12px;
-    font-size: 20px;
+    margin-bottom: 16px;
+    font-size: 24px;
 }
 
 .error-card p {
-    color: #cbd5e0;
-    margin-bottom: 8px;
+    color: #4a5568;
+    margin-bottom: 12px;
 }
 
 .error-hint {
     font-size: 14px;
-    color: #718096;
-    margin-top: 16px;
+    color: #a0aec0;
+    margin-top: 20px;
 }
 
-/* Responsive adjustments */
+/* Notification */
+.notification {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    padding: 12px 24px;
+    border-radius: 12px;
+    font-size: 14px;
+    font-weight: 500;
+    z-index: 10000;
+    animation: slideIn 0.3s ease-out;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+}
+
+.notification.success {
+    background: #48bb78;
+    color: white;
+}
+
+.notification.error {
+    background: #f56565;
+    color: white;
+}
+
+@keyframes slideIn {
+    from {
+        transform: translateX(100%);
+        opacity: 0;
+    }
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
+
+/* Responsive */
 @media (max-width: 768px) {
+    body {
+        padding: 20px 16px;
+    }
+    
+    .logo {
+        font-size: 48px;
+    }
+    
+    .assessment-card-main {
+        padding: 32px 24px;
+    }
+    
+    .url-input-group {
+        flex-direction: column;
+        background: transparent;
+        padding: 0;
+        gap: 12px;
+    }
+    
+    .url-prefix {
+        width: 100%;
+        text-align: center;
+        background: #f7fafc;
+    }
+    
+    .repo-input {
+        width: 100%;
+        background: #f7fafc;
+        border-radius: 12px;
+        padding: 14px;
+    }
+    
+    .assess-btn {
+        width: 100%;
+    }
+    
+    .assessment-grid {
+        grid-template-columns: 1fr;
+    }
+    
+    .score-value {
+        font-size: 56px;
+    }
+    
     .report-actions {
         flex-direction: column;
     }
@@ -98,5 +623,18 @@
     .report-btn {
         width: 100%;
         justify-content: center;
+    }
+    
+    .fix-header {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+    
+    .fix-impact {
+        align-self: flex-start;
+    }
+    
+    .fix-description, .fix-suggestion {
+        padding-left: 0;
     }
 }
