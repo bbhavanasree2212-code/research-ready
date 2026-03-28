@@ -8,7 +8,7 @@
 </head>
 <body>
     <div class="container">
-        <!-- Header -->
+        <!-- Header Section -->
         <div class="header">
             <h1 class="logo">RepoReady</h1>
             <div class="badge">
@@ -18,20 +18,22 @@
             <p class="tagline">Is your software research-ready?</p>
         </div>
 
-        <!-- Main Input Section -->
-        <div class="input-section">
-            <div class="input-card">
+        <!-- Main Assessment Card -->
+        <div class="assessment-card-main">
+            <div class="card-content">
                 <p class="input-label">ENTER A PUBLIC GITHUB URL TO BEGIN ASSESSMENT</p>
-                <div class="input-group">
-                    <input type="text" id="repoUrl" placeholder="https://github.com/owner/repo" class="repo-input">
+                
+                <div class="url-input-group">
+                    <div class="url-prefix">https://github.com/</div>
+                    <input type="text" id="repoInput" class="repo-input" placeholder="owner/repo">
                     <button id="assessBtn" class="assess-btn">ASSESS →</button>
                 </div>
                 
                 <div class="demo-section">
                     <p class="demo-label">TRY THESE:</p>
                     <div class="demo-buttons">
-                        <button class="demo-btn" data-repo="https://github.com/facebook/react">facebook/react</button>
-                        <button class="demo-btn" data-repo="https://github.com/octocat/Spoon-Knife">octocat/Spoon-Knife</button>
+                        <button class="demo-btn" data-repo="facebook/react">facebook/react</button>
+                        <button class="demo-btn" data-repo="octocat/Spoon-Knife">octocat/Spoon-Knife</button>
                         <button class="demo-btn" id="loadLastBtn">Load Last Assessment</button>
                     </div>
                 </div>
@@ -41,7 +43,8 @@
         <!-- Loading State -->
         <div id="loading" class="loading" style="display: none;">
             <div class="spinner"></div>
-            <p>Analyzing repository...</p>
+            <p>Analyzing repository structure and best practices...</p>
+            <p class="loading-subtitle">This may take a few seconds</p>
         </div>
 
         <!-- Results Container -->
