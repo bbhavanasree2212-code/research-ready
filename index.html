@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RepoReady - Research Software Readiness Assessment</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <h1 class="logo">RepoReady</h1>
+            <div class="badge">
+                <span>LIVE ASSESSMENT</span>
+                <span>V1.0.0</span>
+            </div>
+            <p class="tagline">Is your software research-ready?</p>
+        </div>
+
+        <!-- Main Input Section -->
+        <div class="input-section">
+            <div class="input-card">
+                <p class="input-label">ENTER A PUBLIC GITHUB URL TO BEGIN ASSESSMENT</p>
+                <div class="input-group">
+                    <input type="text" id="repoUrl" placeholder="https://github.com/owner/repo" class="repo-input">
+                    <button id="assessBtn" class="assess-btn">ASSESS →</button>
+                </div>
+                
+                <div class="demo-section">
+                    <p class="demo-label">TRY THESE:</p>
+                    <div class="demo-buttons">
+                        <button class="demo-btn" data-repo="https://github.com/facebook/react">facebook/react</button>
+                        <button class="demo-btn" data-repo="https://github.com/octocat/Spoon-Knife">octocat/Spoon-Knife</button>
+                        <button class="demo-btn" id="loadLastBtn">Load Last Assessment</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Loading State -->
+        <div id="loading" class="loading" style="display: none;">
+            <div class="spinner"></div>
+            <p>Analyzing repository...</p>
+        </div>
+
+        <!-- Results Container -->
+        <div id="result" class="result-container"></div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
