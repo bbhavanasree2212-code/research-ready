@@ -37,7 +37,15 @@ async function assessRepository(owner, repo) {
                 hasLicense = true;
             }
         } catch (e) {
-            console.log('No LICENSE found');
+            // Try LICENSE.md
+            try {
+                const licenseResponse = await fetch(`${baseUrl}/contents/LICENSE.md`);
+                if (licenseResponse.ok) {
+                    const licenseData = await licenseResponse.json();
+                    licenseContent = atob(licenseData.content);
+                    hasLicense = true;
+                }
+            } catch (e2) {}
         }
         
         // Fetch package.json if exists
@@ -117,6 +125,20 @@ async function assessRepository(owner, repo) {
             }
         } catch (e) {}
         
+        // Check for code quality configs
+        let hasCodeQuality = false;
+        let qualityDetails = [];
+        const qualityPaths = ['pyproject.toml', '.prettierrc', '.eslintrc', '.stylelintrc', 'setup.py'];
+        for (const qPath of qualityPaths) {
+            try {
+                const qResponse = await fetch(`${baseUrl}/contents/${qPath}`);
+                if (qResponse.ok) {
+                    hasCodeQuality = true;
+                    qualityDetails.push(qPath);
+                }
+            } catch (e) {}
+        }
+        
         // Evaluate each category
         const readmeEval = evaluateReadme(readmeContent);
         const licenseEval = evaluateLicense(hasLicense, licenseContent);
@@ -124,21 +146,33 @@ async function assessRepository(owner, repo) {
         const ciEval = evaluateCI(hasCI, ciType);
         const versioningEval = evaluateVersioning(tags);
         const citationEval = evaluateCitation(hasCitation, readmeContent);
+        const codeQualityEval = evaluateCodeQuality(hasCodeQuality, qualityDetails);
         
         // Calculate total score
         const totalScore = readmeEval.score + licenseEval.score + testsEval.score + 
                           ciEval.score + versioningEval.score + citationEval.score;
         
-        // Generate fixes checklist
+        // Generate fixes checklist with ALL priorities (HIGH, MEDIUM, LOW)
         const fixes = [];
         
+        // HIGH IMPACT FIXES
         if (licenseEval.score === 0) {
             fixes.push({
                 icon: '❌',
                 title: 'Add a LICENSE file to the root directory',
                 description: 'CRITICAL: LEGAL REQUIREMENT FOR DISTRIBUTION AND REUSE',
                 impact: 'HIGH IMPACT',
+                priority: 'high',
                 suggestion: 'Add MIT, Apache-2.0, or GPL-3.0 license file'
+            });
+        } else if (licenseEval.score < 15) {
+            fixes.push({
+                icon: '⚠️',
+                title: 'Update to standard open-source license',
+                description: 'Current license may not be suitable for open-source research use',
+                impact: 'HIGH IMPACT',
+                priority: 'high',
+                suggestion: 'Switch to MIT, Apache-2.0, or GPL-3.0 license'
             });
         }
         
@@ -148,6 +182,7 @@ async function assessRepository(owner, repo) {
                 title: 'Implement a basic test suite and tests directory',
                 description: 'HIGH: ENSURES SCIENTIFIC INTEGRITY AND PREVENTS REGRESSIONS',
                 impact: 'HIGH IMPACT',
+                priority: 'high',
                 suggestion: 'Add unit tests using pytest, jest, or your language\'s testing framework'
             });
         } else if (testsEval.score < 15) {
@@ -156,16 +191,19 @@ async function assessRepository(owner, repo) {
                 title: 'Expand test coverage',
                 description: 'MEDIUM: CURRENT TESTS ARE LIMITED',
                 impact: 'MEDIUM IMPACT',
-                suggestion: 'Add more comprehensive test cases'
+                priority: 'medium',
+                suggestion: 'Add more comprehensive test cases to improve coverage'
             });
         }
         
+        // MEDIUM IMPACT FIXES
         if (ciEval.score === 0) {
             fixes.push({
                 icon: '🔘',
                 title: 'Configure GitHub Actions to automate tests',
                 description: 'MEDIUM: INCREASES STABILITY AND TRUST IN THE REPOSITORY',
                 impact: 'MEDIUM IMPACT',
+                priority: 'medium',
                 suggestion: 'Create .github/workflows/ci.yml with test automation'
             });
         }
@@ -176,7 +214,17 @@ async function assessRepository(owner, repo) {
                 title: 'Create a CITATION.cff file',
                 description: 'MEDIUM: IMPROVES ACADEMIC IMPACT TRACKING',
                 impact: 'MEDIUM IMPACT',
+                priority: 'medium',
                 suggestion: 'Add CITATION.cff with authors, title, and DOI if available'
+            });
+        } else if (citationEval.score < 8) {
+            fixes.push({
+                icon: '📝',
+                title: 'Improve citation information',
+                description: 'LOW: CURRENT CITATION INFO IS INCOMPLETE',
+                impact: 'LOW IMPACT',
+                priority: 'low',
+                suggestion: 'Convert README citation info to CITATION.cff format'
             });
         }
         
@@ -186,7 +234,49 @@ async function assessRepository(owner, repo) {
                 title: 'Enhance README documentation',
                 description: 'MEDIUM: IMPROVES ONSET AND USABILITY',
                 impact: 'MEDIUM IMPACT',
+                priority: 'medium',
                 suggestion: 'Add installation, usage examples, and API documentation'
+            });
+        } else if (readmeEval.score < 25) {
+            fixes.push({
+                icon: '📝',
+                title: 'Add more details to README',
+                description: 'LOW: MISSING SOME DOCUMENTATION SECTIONS',
+                impact: 'LOW IMPACT',
+                priority: 'low',
+                suggestion: 'Add structure overview and documentation links'
+            });
+        }
+        
+        if (versioningEval.score === 0) {
+            fixes.push({
+                icon: '🏷️',
+                title: 'Create version tags for releases',
+                description: 'MEDIUM: IMPORTANT FOR REPRODUCIBILITY',
+                impact: 'MEDIUM IMPACT',
+                priority: 'medium',
+                suggestion: 'Create semantic version tags (v1.0.0, v1.0.1, etc.)'
+            });
+        } else if (versioningEval.score < 8) {
+            fixes.push({
+                icon: '🏷️',
+                title: 'Adopt semantic versioning',
+                description: 'LOW: CURRENT TAGS NOT FOLLOWING SEMVER',
+                impact: 'LOW IMPACT',
+                priority: 'low',
+                suggestion: 'Use semantic versioning format: v1.0.0, v1.0.1, etc.'
+            });
+        }
+        
+        // LOW IMPACT FIXES
+        if (!hasCodeQuality) {
+            fixes.push({
+                icon: '🎨',
+                title: 'Add code formatting configuration',
+                description: 'LOW: IMPROVES CODE READABILITY AND MAINTAINABILITY',
+                impact: 'LOW IMPACT',
+                priority: 'low',
+                suggestion: 'Add .prettierrc, .eslintrc, or pyproject.toml with formatter config'
             });
         }
         
@@ -202,42 +292,48 @@ async function assessRepository(owner, repo) {
                     score: readmeEval.score,
                     maxScore: 25,
                     reason: readmeEval.reason,
-                    impact: 'MEDIUM IMPACT'
+                    impact: 'MEDIUM IMPACT',
+                    threshold: 20
                 },
                 license: {
                     name: 'License',
                     score: licenseEval.score,
                     maxScore: 20,
                     reason: licenseEval.reason,
-                    impact: 'HIGH IMPACT'
+                    impact: 'HIGH IMPACT',
+                    threshold: 15
                 },
                 tests: {
                     name: 'Tests',
                     score: testsEval.score,
                     maxScore: 20,
                     reason: testsEval.reason,
-                    impact: 'HIGH IMPACT'
+                    impact: 'HIGH IMPACT',
+                    threshold: 15
                 },
                 ci: {
                     name: 'CI Config',
                     score: ciEval.score,
                     maxScore: 15,
                     reason: ciEval.reason,
-                    impact: 'MEDIUM IMPACT'
+                    impact: 'MEDIUM IMPACT',
+                    threshold: 10
                 },
                 versioning: {
                     name: 'Versioning',
                     score: versioningEval.score,
                     maxScore: 10,
                     reason: versioningEval.reason,
-                    impact: 'MEDIUM IMPACT'
+                    impact: 'MEDIUM IMPACT',
+                    threshold: 8
                 },
                 citation: {
                     name: 'Citation',
                     score: citationEval.score,
                     maxScore: 10,
                     reason: citationEval.reason,
-                    impact: 'MEDIUM IMPACT'
+                    impact: 'MEDIUM IMPACT',
+                    threshold: 8
                 }
             },
             fixes: fixes,
@@ -394,6 +490,22 @@ function evaluateCitation(hasCitationFile, readmeContent) {
     };
 }
 
+function evaluateCodeQuality(hasConfig, details) {
+    if (!hasConfig) {
+        return {
+            score: 0,
+            reason: 'No explicit formatting configurations (like Black, Prettier, or ESLint) were found.',
+            details: []
+        };
+    }
+    
+    return {
+        score: 15,
+        reason: `Code formatting configurations detected: ${details.join(', ')}. This improves code readability and maintainability.`,
+        details: details
+    };
+}
+
 function getRating(score) {
     if (score >= 85) return 'EXCELLENT - Research Software Ready';
     if (score >= 70) return 'GOOD - Mostly Ready';
@@ -458,9 +570,6 @@ function renderResults(assessment) {
             <button id="downloadJsonBtn" class="report-btn download-btn">
                 💾 Download JSON Report
             </button>
-            <button id="copyJsonBtn" class="report-btn copy-btn">
-                📋 Copy JSON to Clipboard
-            </button>
         </div>
         
         <div class="score-card">
@@ -479,11 +588,14 @@ function renderResults(assessment) {
         <div class="assessment-grid">
             ${Object.entries(assessment.checks).map(([key, check]) => {
                 const impactClass = check.impact.toLowerCase().replace(' ', '-');
+                // Determine if score is below threshold (should be red)
+                const isBelowThreshold = check.score < check.threshold;
+                const scoreClass = isBelowThreshold ? 'score-low' : 'score-good';
                 return `
                     <div class="assessment-card ${impactClass}">
                         <div class="card-header">
                             <div class="card-title">${check.name}</div>
-                            <div class="card-score">
+                            <div class="card-score ${scoreClass}">
                                 ${check.score}<span class="max">/${check.maxScore}</span>
                             </div>
                         </div>
@@ -498,11 +610,11 @@ function renderResults(assessment) {
             <h2 class="section-title">🔧 PRIORITY FIX CHECKLIST</h2>
             <div class="fixes-list">
                 ${assessment.fixes.map(fix => `
-                    <div class="fix-item ${fix.impact.toLowerCase().replace(' ', '-')}">
+                    <div class="fix-item ${fix.priority}">
                         <div class="fix-header">
                             <div class="fix-icon">${fix.icon || '❌'}</div>
                             <div class="fix-title">${fix.title}</div>
-                            <div class="fix-impact ${fix.impact.toLowerCase().replace(' ', '-')}">
+                            <div class="fix-impact ${fix.priority}">
                                 ${fix.impact}
                             </div>
                         </div>
@@ -522,11 +634,10 @@ function renderResults(assessment) {
     resultDiv.innerHTML = html;
     resultDiv.scrollIntoView({ behavior: 'smooth', block: 'start' });
     
-    // Add event listeners for buttons
+    // Add event listeners for download buttons
     setTimeout(() => {
         document.getElementById('downloadHtmlBtn')?.addEventListener('click', () => downloadHTMLReport(assessment));
         document.getElementById('downloadJsonBtn')?.addEventListener('click', () => downloadJSONReport(assessment));
-        document.getElementById('copyJsonBtn')?.addEventListener('click', () => copyJSONToClipboard(assessment));
     }, 100);
 }
 
@@ -594,8 +705,8 @@ function generateHTMLReport(assessment) {
         }
         .rating {
             font-size: 18px;
-            color: #48bb78;
             margin-top: 12px;
+            font-weight: 600;
         }
         .summary {
             color: #4a5568;
@@ -619,7 +730,9 @@ function generateHTMLReport(assessment) {
         .assessment-card.medium-impact { border-left-color: #ed8936; }
         .assessment-card.low-impact { border-left-color: #48bb78; }
         .card-title { font-size: 18px; font-weight: 600; margin-bottom: 12px; }
-        .card-score { font-size: 28px; font-weight: 700; color: #667eea; }
+        .card-score { font-size: 28px; font-weight: 700; }
+        .card-score.score-low { color: #f56565; }
+        .card-score.score-good { color: #48bb78; }
         .fixes-section {
             background: #f7fafc;
             border-radius: 24px;
@@ -637,6 +750,9 @@ function generateHTMLReport(assessment) {
         .fix-item.high { border-left-color: #f56565; }
         .fix-item.medium { border-left-color: #ed8936; }
         .fix-item.low { border-left-color: #48bb78; }
+        .fix-impact.high { color: #f56565; }
+        .fix-impact.medium { color: #ed8936; }
+        .fix-impact.low { color: #48bb78; }
         @media (max-width: 768px) {
             .assessment-grid { grid-template-columns: 1fr; }
             .score-value { font-size: 56px; }
@@ -658,21 +774,26 @@ function generateHTMLReport(assessment) {
             <div class="summary">${assessment.summary}</div>
         </div>
         <div class="assessment-grid">
-            ${Object.entries(assessment.checks).map(([key, check]) => `
-                <div class="assessment-card ${check.impact.toLowerCase().replace(' ', '-')}">
-                    <div class="card-title">${check.name}</div>
-                    <div class="card-score">${check.score}/${check.maxScore}</div>
-                    <div style="margin:12px 0;font-size:12px;font-weight:600;color:${check.impact === 'HIGH IMPACT' ? '#f56565' : check.impact === 'MEDIUM IMPACT' ? '#ed8936' : '#48bb78'}">${check.impact}</div>
-                    <div style="color:#718096;font-size:14px;">${check.reason}</div>
-                </div>
-            `).join('')}
+            ${Object.entries(assessment.checks).map(([key, check]) => {
+                const isBelowThreshold = check.score < check.threshold;
+                const scoreClass = isBelowThreshold ? 'score-low' : 'score-good';
+                return `
+                    <div class="assessment-card ${check.impact.toLowerCase().replace(' ', '-')}">
+                        <div class="card-title">${check.name}</div>
+                        <div class="card-score ${scoreClass}">${check.score}/${check.maxScore}</div>
+                        <div style="margin:12px 0;font-size:12px;font-weight:600;color:${check.impact === 'HIGH IMPACT' ? '#f56565' : check.impact === 'MEDIUM IMPACT' ? '#ed8936' : '#48bb78'}">${check.impact}</div>
+                        <div style="color:#718096;font-size:14px;">${check.reason}</div>
+                    </div>
+                `;
+            }).join('')}
         </div>
         <div class="fixes-section">
             <h2 class="section-title">🔧 PRIORITY FIX CHECKLIST</h2>
             ${assessment.fixes.map(fix => `
-                <div class="fix-item ${fix.impact.toLowerCase().replace(' ', '-')}">
+                <div class="fix-item ${fix.priority}">
                     <div style="font-weight:600;margin-bottom:8px;">${fix.icon} ${fix.title}</div>
                     <div style="color:#718096;font-size:13px;margin-bottom:8px;">${fix.description}</div>
+                    <div class="fix-impact ${fix.priority}" style="font-size:12px;font-weight:600;margin-bottom:8px;">${fix.impact}</div>
                     <div style="color:#667eea;font-size:13px;">💡 ${fix.suggestion}</div>
                 </div>
             `).join('')}
@@ -697,15 +818,6 @@ function downloadJSONReport(assessment) {
     const filename = `repoready-report-${assessment.repository.replace('/', '-')}.json`;
     downloadFile(jsonContent, filename, 'application/json');
     showNotification('✅ JSON report downloaded!', 'success');
-}
-
-function copyJSONToClipboard(assessment) {
-    const jsonStr = JSON.stringify(assessment, null, 2);
-    navigator.clipboard.writeText(jsonStr).then(() => {
-        showNotification('✅ JSON copied to clipboard!', 'success');
-    }).catch(() => {
-        showNotification('❌ Failed to copy', 'error');
-    });
 }
 
 function showNotification(message, type) {
