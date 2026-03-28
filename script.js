@@ -2,57 +2,456 @@
 const STORAGE_KEY = 'repoready_last_assessment';
 let currentAssessment = null;
 
-// API endpoint - update this to your backend URL when deploying
-const API_URL = window.location.hostname === 'localhost' 
-    ? 'http://localhost:3000/api/assess'
-    : '/api/assess';
+// Use a proxy to avoid CORS issues
+// For local testing, you can use a backend server
+// For production, you'll need a proper backend
 
-async function assessRepository(repoUrl, format = 'json') {
+async function assessRepository(repoUrl) {
     try {
-        const response = await fetch(`${API_URL}?format=${format}`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ repoUrl })
-        });
+        // Parse the repo URL to get owner and repo
+        let owner, repo;
         
-        if (!response.ok) {
-            const error = await response.json();
-            throw new Error(error.error || 'Assessment failed');
-        }
-        
-        if (format === 'html') {
-            return await response.text();
+        if (repoUrl.includes('github.com/')) {
+            const match = repoUrl.match(/github\.com\/([^\/]+)\/([^\/]+)/);
+            if (match) {
+                owner = match[1];
+                repo = match[2].replace('.git', '');
+            }
         } else {
-            const data = await response.json();
-            // Save to localStorage
-            localStorage.setItem(STORAGE_KEY, JSON.stringify({
-                ...data,
-                savedAt: new Date().toISOString()
-            }));
-            return data;
+            // If just owner/repo format
+            const parts = repoUrl.split('/');
+            if (parts.length === 2) {
+                owner = parts[0];
+                repo = parts[1];
+            }
         }
+        
+        if (!owner || !repo) {
+            throw new Error('Invalid repository URL format');
+        }
+        
+        // Fetch data from GitHub API
+        const assessment = await fetchAndAssess(owner, repo);
+        
+        // Save to localStorage
+        localStorage.setItem(STORAGE_KEY, JSON.stringify({
+            ...assessment,
+            savedAt: new Date().toISOString()
+        }));
+        
+        return assessment;
     } catch (error) {
         console.error('Assessment error:', error);
         throw error;
     }
 }
 
+async function fetchAndAssess(owner, repo) {
+    const baseUrl = `https://api.github.com/repos/${owner}/${repo}`;
+    
+    try {
+        // Fetch multiple files in parallel
+        const [repoInfo, readme, license, packageJson, contents, tags] = await Promise.all([
+            fetch(`${baseUrl}`).then(res => res.json()),
+            fetch(`${baseUrl}/readme`).then(res => res.ok ? res.json() : null),
+            fetch(`${baseUrl}/contents/LICENSE`).then(res => res.ok ? res.json() : null),
+            fetch(`${baseUrl}/contents/package.json`).then(res => res.ok ? res.json() : null),
+            fetch(`${baseUrl}/contents`).then(res => res.json()),
+            fetch(`${baseUrl}/tags`).then(res => res.json())
+        ]);
+        
+        // Decode README content
+        let readmeContent = '';
+        if (readme && readme.content) {
+            readmeContent = Buffer.from(readme.content, 'base64').toString('utf-8');
+        }
+        
+        // Decode LICENSE content
+        let licenseContent = '';
+        if (license && license.content) {
+            licenseContent = Buffer.from(license.content, 'base64').toString('utf-8');
+        }
+        
+        // Parse package.json
+        let packageJsonData = null;
+        if (packageJson && packageJson.content) {
+            try {
+                const pkgContent = Buffer.from(packageJson.content, 'base64').toString('utf-8');
+                packageJsonData = JSON.parse(pkgContent);
+            } catch (e) {}
+        }
+        
+        // Check for test files
+        let hasTests = false;
+        let testFiles = [];
+        if (Array.isArray(contents)) {
+            contents.forEach(item => {
+                if (item.type === 'dir' && /test|tests?/i.test(item.name)) {
+                    hasTests = true;
+                    testFiles.push(item.name);
+                }
+                if (item.type === 'file' && /test|spec/i.test(item.name)) {
+                    hasTests = true;
+                    testFiles.push(item.name);
+                }
+            });
+        }
+        
+        // Check for CI config
+        let hasCI = false;
+        let ciType = null;
+        const ciFiles = ['.github/workflows/ci.yml', '.github/workflows/test.yml', '.gitlab-ci.yml', '.travis.yml'];
+        for (const ciFile of ciFiles) {
+            const response = await fetch(`${baseUrl}/contents/${ciFile}`).catch(() => null);
+            if (response && response.ok) {
+                hasCI = true;
+                ciType = ciFile.includes('github') ? 'GitHub Actions' : 
+                         ciFile.includes('gitlab') ? 'GitLab CI' : 'Travis CI';
+                break;
+            }
+        }
+        
+        // Check for CITATION.cff
+        let hasCitation = false;
+        const citationResponse = await fetch(`${baseUrl}/contents/CITATION.cff`).catch(() => null);
+        if (citationResponse && citationResponse.ok) hasCitation = true;
+        
+        // Evaluate each category
+        const readmeScore = evaluateReadme(readmeContent);
+        const licenseScore = evaluateLicense(license, licenseContent);
+        const testsScore = evaluateTests(hasTests, packageJsonData, testFiles);
+        const ciScore = evaluateCI(hasCI, ciType);
+        const versioningScore = evaluateVersioning(tags);
+        const citationScore = evaluateCitation(hasCitation, readmeContent);
+        
+        const totalScore = readmeScore.score + licenseScore.score + testsScore.score + 
+                          ciScore.score + versioningScore.score + citationScore.score;
+        
+        // Generate fixes
+        const fixes = [];
+        
+        if (licenseScore.score === 0) {
+            fixes.push({
+                icon: '❌',
+                title: 'Add a LICENSE file to the root directory',
+                description: 'CRITICAL: LEGAL REQUIREMENT FOR DISTRIBUTION AND REUSE',
+                impact: 'HIGH IMPACT',
+                suggestion: 'Add MIT, Apache-2.0, or GPL-3.0 license file'
+            });
+        }
+        
+        if (testsScore.score === 0) {
+            fixes.push({
+                icon: '❌',
+                title: 'Implement a basic test suite and tests directory',
+                description: 'HIGH: ENSURES SCIENTIFIC INTEGRITY AND PREVENTS REGRESSIONS',
+                impact: 'HIGH IMPACT',
+                suggestion: 'Add unit tests using pytest, jest, or your language\'s testing framework'
+            });
+        } else if (testsScore.score < 15) {
+            fixes.push({
+                icon: '⚠️',
+                title: 'Expand test coverage',
+                description: 'MEDIUM: CURRENT TESTS ARE LIMITED',
+                impact: 'MEDIUM IMPACT',
+                suggestion: 'Add more comprehensive test cases'
+            });
+        }
+        
+        if (ciScore.score === 0) {
+            fixes.push({
+                icon: '🔘',
+                title: 'Configure GitHub Actions to automate tests',
+                description: 'MEDIUM: INCREASES STABILITY AND TRUST IN THE REPOSITORY',
+                impact: 'MEDIUM IMPACT',
+                suggestion: 'Create .github/workflows/ci.yml with test automation'
+            });
+        }
+        
+        if (citationScore.score === 0) {
+            fixes.push({
+                icon: '📄',
+                title: 'Create a CITATION.cff file',
+                description: 'MEDIUM: IMPROVES ACADEMIC IMPACT TRACKING',
+                impact: 'MEDIUM IMPACT',
+                suggestion: 'Add CITATION.cff with authors, title, and DOI if available'
+            });
+        }
+        
+        if (readmeScore.score < 20) {
+            fixes.push({
+                icon: '📖',
+                title: 'Enhance README documentation',
+                description: 'MEDIUM: IMPROVES ONSET AND USABILITY',
+                impact: 'MEDIUM IMPACT',
+                suggestion: 'Add installation, usage examples, and API documentation'
+            });
+        }
+        
+        return {
+            repository: `${owner}/${repo}`,
+            url: `https://github.com/${owner}/${repo}`,
+            overallScore: totalScore,
+            rating: getRating(totalScore),
+            summary: generateSummary(readmeScore, licenseScore, testsScore, ciScore, versioningScore, citationScore, totalScore),
+            checks: {
+                readme: {
+                    name: 'README Quality',
+                    score: readmeScore.score,
+                    maxScore: 25,
+                    reason: readmeScore.reason,
+                    impact: 'MEDIUM IMPACT'
+                },
+                license: {
+                    name: 'License',
+                    score: licenseScore.score,
+                    maxScore: 20,
+                    reason: licenseScore.reason,
+                    impact: 'HIGH IMPACT'
+                },
+                tests: {
+                    name: 'Tests',
+                    score: testsScore.score,
+                    maxScore: 20,
+                    reason: testsScore.reason,
+                    impact: 'HIGH IMPACT'
+                },
+                ci: {
+                    name: 'CI Config',
+                    score: ciScore.score,
+                    maxScore: 15,
+                    reason: ciScore.reason,
+                    impact: 'MEDIUM IMPACT'
+                },
+                versioning: {
+                    name: 'Versioning',
+                    score: versioningScore.score,
+                    maxScore: 10,
+                    reason: versioningScore.reason,
+                    impact: 'MEDIUM IMPACT'
+                },
+                citation: {
+                    name: 'Citation',
+                    score: citationScore.score,
+                    maxScore: 10,
+                    reason: citationScore.reason,
+                    impact: 'MEDIUM IMPACT'
+                }
+            },
+            fixes: fixes,
+            timestamp: new Date().toISOString()
+        };
+        
+    } catch (error) {
+        console.error('GitHub API error:', error);
+        throw new Error(`Failed to fetch repository data: ${error.message}`);
+    }
+}
+
+function evaluateReadme(content) {
+    if (!content) {
+        return { score: 0, reason: 'No README file detected in the root directory.' };
+    }
+    
+    let score = 0;
+    const hasInstall = /install|setup|getting started|installation|pip install|npm install/i.test(content);
+    const hasRun = /run|usage|example|quick start|how to use|command/i.test(content);
+    const hasStructure = /structure|organization|overview/i.test(content);
+    const hasDocs = /documentation|docs|reference/i.test(content);
+    
+    if (hasInstall) score += 10;
+    if (hasRun) score += 10;
+    if (hasStructure) score += 5;
+    if (hasDocs) score += 5;
+    
+    let reason = '';
+    if (score >= 25) {
+        reason = 'README is professionally structured with clear navigation and comprehensive documentation.';
+    } else if (score >= 15) {
+        reason = 'README contains essential information but could benefit from more detailed setup guides.';
+    } else if (score > 0) {
+        reason = 'README exists but lacks critical setup or usage instructions.';
+    } else {
+        reason = 'No README file detected in the root directory.';
+    }
+    
+    return { score: Math.min(score, 25), reason };
+}
+
+function evaluateLicense(license, content) {
+    if (!license) {
+        return { 
+            score: 0, 
+            reason: 'No LICENSE file was detected in the root directory. A license is mandatory for legal reuse in research and industry.'
+        };
+    }
+    
+    const licenseName = content?.split('\n')[0] || 'Unknown';
+    const isOpenSource = /MIT|Apache|GPL|BSD|MPL|LGPL/i.test(licenseName);
+    
+    if (isOpenSource) {
+        return { 
+            score: 20, 
+            reason: `${licenseName} license detected. This open-source license enables legal reuse and distribution.`
+        };
+    }
+    
+    return { 
+        score: 10, 
+        reason: `License present (${licenseName}) but not a standard open-source license. Consider using MIT, Apache-2.0, or GPL.`
+    };
+}
+
+function evaluateTests(hasTests, packageJson, testFiles) {
+    if (!hasTests && !packageJson?.scripts?.test) {
+        return {
+            score: 0,
+            reason: 'No test directories or test configuration files were detected. Research software requires verification suites to ensure implementation accuracy.'
+        };
+    }
+    
+    let score = 0;
+    let details = [];
+    
+    if (hasTests) {
+        score += 15;
+        details.push(`Test files/directories found: ${testFiles.join(', ')}`);
+    }
+    
+    if (packageJson?.scripts?.test) {
+        score += 5;
+        details.push('Test script defined in package.json');
+    }
+    
+    const reason = details.length > 0 
+        ? `Test infrastructure detected: ${details.join('. ')}. ${score < 20 ? 'Consider expanding test coverage.' : ''}`
+        : 'No test directories or test configuration files were detected.';
+    
+    return { score: Math.min(score, 20), reason };
+}
+
+function evaluateCI(hasCI, ciType) {
+    if (!hasCI) {
+        return {
+            score: 0,
+            reason: 'No GitHub Actions, GitLab CI, or other CI/CD workflows detected. Automated testing is essential for maintaining repository reliability.'
+        };
+    }
+    
+    return {
+        score: 15,
+        reason: `${ciType} workflow detected. This enables automated testing and continuous integration.`
+    };
+}
+
+function evaluateVersioning(tags) {
+    if (!tags || tags.length === 0) {
+        return {
+            score: 0,
+            reason: 'No release tags detected. Versioning is important for reproducibility and tracking changes.'
+        };
+    }
+    
+    const semanticVersions = tags.filter(t => /^v?\d+\.\d+\.\d+/.test(t.name || t));
+    const versionCount = semanticVersions.length > 0 ? semanticVersions.length : tags.length;
+    
+    let score = 5;
+    let reason = '';
+    
+    if (semanticVersions.length > 0) {
+        score = 10;
+        reason = `The project maintains excellent versioning with ${versionCount} release tag(s) following semantic versioning.`;
+    } else if (tags.length >= 3) {
+        score = 8;
+        reason = `${versionCount} release tag(s) detected. Consider adopting semantic versioning (v1.0.0 format).`;
+    } else {
+        reason = `${versionCount} release tag(s) detected. Adding more structured versioning would improve reproducibility.`;
+    }
+    
+    return { score, reason };
+}
+
+function evaluateCitation(hasCitationFile, readmeContent) {
+    if (hasCitationFile) {
+        return {
+            score: 10,
+            reason: 'CITATION.cff file detected, enabling standardized academic attribution.'
+        };
+    }
+    
+    if (readmeContent && /citation|how to cite|reference|bibtex|doi/i.test(readmeContent)) {
+        return {
+            score: 7,
+            reason: 'Citation information found in README. Consider adding a CITATION.cff file for better integration with academic tools.'
+        };
+    }
+    
+    return {
+        score: 0,
+        reason: 'No CITATION.cff file or citation information detected. This makes it difficult for researchers to properly cite your work.'
+    };
+}
+
+function getRating(score) {
+    if (score >= 85) return 'EXCELLENT - Research Software Ready';
+    if (score >= 70) return 'GOOD - Mostly Ready';
+    if (score >= 50) return 'FAIR - Needs Improvement';
+    if (score >= 30) return 'POOR - Significant Work Needed';
+    return 'CRITICAL - Not Ready for Research Use';
+}
+
+function generateSummary(readme, license, tests, ci, versioning, citation, totalScore) {
+    const goodPoints = [];
+    const badPoints = [];
+    
+    if (readme.score >= 20) goodPoints.push('professional README documentation');
+    else if (readme.score > 0) badPoints.push('incomplete README documentation');
+    else badPoints.push('missing README');
+    
+    if (license.score >= 15) goodPoints.push('proper licensing');
+    else if (license.score > 0) badPoints.push('non-standard license');
+    else badPoints.push('missing LICENSE file');
+    
+    if (tests.score >= 15) goodPoints.push('comprehensive test suites');
+    else if (tests.score > 0) badPoints.push('limited test coverage');
+    else badPoints.push('no test suite');
+    
+    if (ci.score >= 10) goodPoints.push('CI/CD automation');
+    else badPoints.push('no CI/CD configuration');
+    
+    if (versioning.score >= 8) goodPoints.push('robust versioning practices');
+    else if (versioning.score > 0) badPoints.push('inconsistent versioning');
+    else badPoints.push('no version tags');
+    
+    if (citation.score >= 8) goodPoints.push('proper citation metadata');
+    else badPoints.push('missing citation information');
+    
+    let summary = '';
+    if (goodPoints.length > 0) {
+        summary += `The repository exhibits ${goodPoints.join(', ')}. `;
+    }
+    
+    if (badPoints.length > 0) {
+        summary += `However, it fails several core 'research-readiness' benchmarks due to ${badPoints.join(', ')}. `;
+        summary += `These omissions create significant barriers for academic reuse, verification, and legal compliance.`;
+    } else if (goodPoints.length > 0) {
+        summary += `These practices create a solid foundation for research software.`;
+    } else {
+        summary += `The repository needs significant improvements to meet research software standards.`;
+    }
+    
+    return summary;
+}
+
 function downloadFile(content, filename, type) {
-    // Create blob with the content
     const blob = new Blob([content], { type: type });
-    // Create a temporary URL for the blob
     const url = URL.createObjectURL(blob);
-    // Create a temporary anchor element
     const a = document.createElement('a');
     a.href = url;
     a.download = filename;
-    // Append to body, click, and remove
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
-    // Clean up the URL object
     URL.revokeObjectURL(url);
 }
 
@@ -70,93 +469,6 @@ function downloadJSONReport(assessment) {
     showNotification('JSON report downloaded successfully!', 'success');
 }
 
-function renderResults(assessment) {
-    currentAssessment = assessment;
-    
-    const resultDiv = document.getElementById('result');
-    
-    const html = `
-        <div class="report-actions">
-            <button id="downloadHtmlBtn" class="report-btn download-btn">
-                📄 Download HTML Report
-            </button>
-            <button id="downloadJsonBtn" class="report-btn download-btn">
-                💾 Download JSON Report
-            </button>
-            <button id="copyJsonBtn" class="report-btn copy-btn">
-                📋 Copy JSON to Clipboard
-            </button>
-        </div>
-        
-        <div class="score-card">
-            <div class="score-header">
-                <div class="score-label">OVERALL SCORE</div>
-                <div class="score-value">
-                    ${assessment.overallScore}<span class="score-max">/100</span>
-                </div>
-                <div class="rating">${assessment.rating}</div>
-            </div>
-            <div class="summary">
-                ${assessment.summary}
-            </div>
-        </div>
-        
-        <div class="assessment-grid">
-            ${Object.entries(assessment.checks).map(([key, check]) => {
-                const impactClass = check.impact.toLowerCase().replace(' ', '-');
-                return `
-                    <div class="assessment-card ${impactClass}">
-                        <div class="card-header">
-                            <div class="card-title">${check.name}</div>
-                            <div class="card-score">
-                                ${check.score}<span class="max">/${check.maxScore}</span>
-                            </div>
-                        </div>
-                        <div class="card-impact ${impactClass}">${check.impact}</div>
-                        <div class="card-reason">${check.reason}</div>
-                    </div>
-                `;
-            }).join('')}
-        </div>
-        
-        <div class="fixes-section">
-            <h2 class="section-title">🔧 PRIORITY FIX CHECKLIST</h2>
-            <div class="fixes-list">
-                ${assessment.fixes.map(fix => `
-                    <div class="fix-item ${fix.impact.toLowerCase().replace(' ', '-')}">
-                        <div class="fix-header">
-                            <div class="fix-icon">${fix.icon || '❌'}</div>
-                            <div class="fix-title">${fix.title}</div>
-                            <div class="fix-impact ${fix.impact.toLowerCase().replace(' ', '-')}">
-                                ${fix.impact}
-                            </div>
-                        </div>
-                        <div class="fix-description">${fix.description}</div>
-                        <div class="fix-suggestion">💡 ${fix.suggestion}</div>
-                    </div>
-                `).join('')}
-            </div>
-        </div>
-        
-        <div class="info-footer">
-            <div class="timestamp">
-                Report generated: ${new Date(assessment.timestamp).toLocaleString()}
-            </div>
-            <div class="repo-info">
-                Repository: ${assessment.repository}
-            </div>
-        </div>
-    `;
-    
-    resultDiv.innerHTML = html;
-    resultDiv.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    
-    // Add event listeners for download buttons
-    document.getElementById('downloadHtmlBtn')?.addEventListener('click', () => downloadHTMLReport(assessment));
-    document.getElementById('downloadJsonBtn')?.addEventListener('click', () => downloadJSONReport(assessment));
-    document.getElementById('copyJsonBtn')?.addEventListener('click', () => copyJSONToClipboard(assessment));
-}
-
 function copyJSONToClipboard(assessment) {
     const jsonStr = JSON.stringify(assessment, null, 2);
     navigator.clipboard.writeText(jsonStr).then(() => {
@@ -167,516 +479,12 @@ function copyJSONToClipboard(assessment) {
 }
 
 function showNotification(message, type) {
-    // Remove existing notification if any
     const existingNotification = document.querySelector('.notification');
-    if (existingNotification) {
-        existingNotification.remove();
-    }
+    if (existingNotification) existingNotification.remove();
     
     const notification = document.createElement('div');
     notification.className = `notification ${type}`;
     notification.textContent = message;
     document.body.appendChild(notification);
     
-    // Add styles for notification
-    if (!document.querySelector('#notification-styles')) {
-        const style = document.createElement('style');
-        style.id = 'notification-styles';
-        style.textContent = `
-            .notification {
-                position: fixed;
-                bottom: 20px;
-                right: 20px;
-                padding: 12px 24px;
-                border-radius: 12px;
-                font-size: 14px;
-                font-weight: 500;
-                z-index: 10000;
-                animation: slideIn 0.3s ease-out;
-                box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-            }
-            
-            .notification.success {
-                background: #48bb78;
-                color: white;
-            }
-            
-            .notification.error {
-                background: #f56565;
-                color: white;
-            }
-            
-            @keyframes slideIn {
-                from {
-                    transform: translateX(100%);
-                    opacity: 0;
-                }
-                to {
-                    transform: translateX(0);
-                    opacity: 1;
-                }
-            }
-        `;
-        document.head.appendChild(style);
-    }
-    
-    setTimeout(() => {
-        notification.remove();
-    }, 3000);
-}
-
-function generateHTMLReport(assessment) {
-    return `<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>RepoReady Report - ${assessment.repository}</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', sans-serif;
-            background: #0a0e1a;
-            color: #e2e8f0;
-            padding: 40px 20px;
-        }
-        
-        .report-container {
-            max-width: 1200px;
-            margin: 0 auto;
-        }
-        
-        .header {
-            text-align: center;
-            margin-bottom: 48px;
-        }
-        
-        .logo {
-            font-size: 48px;
-            font-weight: 800;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
-            margin-bottom: 12px;
-        }
-        
-        .badge {
-            display: inline-flex;
-            gap: 16px;
-            background: rgba(102, 126, 234, 0.1);
-            padding: 8px 24px;
-            border-radius: 40px;
-            font-size: 14px;
-            margin-bottom: 24px;
-        }
-        
-        .repo-url {
-            color: #667eea;
-            text-decoration: none;
-            font-size: 14px;
-            word-break: break-all;
-        }
-        
-        .score-card {
-            background: linear-gradient(135deg, #1a1f2e 0%, #0f1119 100%);
-            border-radius: 24px;
-            padding: 40px;
-            margin-bottom: 32px;
-            border: 1px solid rgba(102, 126, 234, 0.2);
-        }
-        
-        .score-header {
-            text-align: center;
-            margin-bottom: 32px;
-        }
-        
-        .score-label {
-            font-size: 14px;
-            text-transform: uppercase;
-            letter-spacing: 2px;
-            color: #a0aec0;
-            margin-bottom: 16px;
-        }
-        
-        .score-value {
-            font-size: 72px;
-            font-weight: 800;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
-            line-height: 1;
-        }
-        
-        .score-max {
-            font-size: 24px;
-            color: #4a5568;
-        }
-        
-        .rating {
-            font-size: 18px;
-            color: #48bb78;
-            margin-top: 12px;
-            font-weight: 600;
-        }
-        
-        .summary {
-            color: #cbd5e0;
-            line-height: 1.6;
-            margin-top: 24px;
-            padding-top: 24px;
-            border-top: 1px solid rgba(102, 126, 234, 0.2);
-        }
-        
-        .assessment-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
-            gap: 24px;
-            margin-bottom: 48px;
-        }
-        
-        .assessment-card {
-            background: #1a1f2e;
-            border-radius: 20px;
-            padding: 24px;
-            border-left: 4px solid;
-        }
-        
-        .assessment-card.high-impact { border-left-color: #f56565; }
-        .assessment-card.medium-impact { border-left-color: #ed8936; }
-        .assessment-card.low-impact { border-left-color: #48bb78; }
-        
-        .card-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: baseline;
-            margin-bottom: 16px;
-            flex-wrap: wrap;
-            gap: 8px;
-        }
-        
-        .card-title {
-            font-size: 18px;
-            font-weight: 600;
-        }
-        
-        .card-score {
-            font-size: 28px;
-            font-weight: 700;
-            color: #667eea;
-        }
-        
-        .card-score .max {
-            font-size: 14px;
-            color: #718096;
-        }
-        
-        .card-impact {
-            font-size: 12px;
-            font-weight: 600;
-            margin-bottom: 16px;
-        }
-        
-        .card-impact.high { color: #f56565; }
-        .card-impact.medium { color: #ed8936; }
-        .card-impact.low { color: #48bb78; }
-        
-        .card-reason {
-            font-size: 14px;
-            color: #cbd5e0;
-            line-height: 1.5;
-        }
-        
-        .fixes-section {
-            background: #1a1f2e;
-            border-radius: 24px;
-            padding: 32px;
-            margin-bottom: 32px;
-        }
-        
-        .section-title {
-            font-size: 24px;
-            font-weight: 700;
-            margin-bottom: 24px;
-        }
-        
-        .fixes-list {
-            display: flex;
-            flex-direction: column;
-            gap: 16px;
-        }
-        
-        .fix-item {
-            background: #0f1119;
-            border-radius: 16px;
-            padding: 20px;
-            border-left: 4px solid;
-        }
-        
-        .fix-item.high { border-left-color: #f56565; }
-        .fix-item.medium { border-left-color: #ed8936; }
-        .fix-item.low { border-left-color: #48bb78; }
-        
-        .fix-header {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            margin-bottom: 12px;
-            flex-wrap: wrap;
-        }
-        
-        .fix-icon {
-            font-size: 24px;
-        }
-        
-        .fix-title {
-            font-size: 16px;
-            font-weight: 600;
-            flex: 1;
-        }
-        
-        .fix-impact {
-            font-size: 12px;
-            font-weight: 600;
-            padding: 4px 8px;
-            border-radius: 6px;
-            background: rgba(0, 0, 0, 0.3);
-        }
-        
-        .fix-impact.high { color: #f56565; }
-        .fix-impact.medium { color: #ed8936; }
-        .fix-impact.low { color: #48bb78; }
-        
-        .fix-description {
-            font-size: 13px;
-            color: #a0aec0;
-            margin-bottom: 12px;
-            padding-left: 36px;
-        }
-        
-        .fix-suggestion {
-            font-size: 13px;
-            color: #667eea;
-            padding-left: 36px;
-        }
-        
-        .info-footer {
-            background: #0f1119;
-            border-radius: 16px;
-            padding: 20px;
-            text-align: center;
-            font-size: 12px;
-            color: #718096;
-        }
-        
-        .timestamp {
-            margin-bottom: 8px;
-        }
-        
-        @media (max-width: 768px) {
-            .assessment-grid {
-                grid-template-columns: 1fr;
-            }
-            
-            .score-value {
-                font-size: 48px;
-            }
-            
-            .fix-header {
-                flex-direction: column;
-                align-items: flex-start;
-            }
-            
-            .fix-impact {
-                align-self: flex-start;
-            }
-            
-            .fix-description, .fix-suggestion {
-                padding-left: 0;
-            }
-        }
-        
-        @media print {
-            body {
-                background: white;
-                color: black;
-                padding: 20px;
-            }
-            
-            .score-card, .assessment-card, .fixes-section {
-                break-inside: avoid;
-            }
-        }
-    </style>
-</head>
-<body>
-    <div class="report-container">
-        <div class="header">
-            <h1 class="logo">RepoReady</h1>
-            <div class="badge">
-                <span>RESEARCH SOFTWARE READINESS REPORT</span>
-            </div>
-            <a href="${assessment.url}" class="repo-url" target="_blank">${assessment.url}</a>
-        </div>
-        
-        <div class="score-card">
-            <div class="score-header">
-                <div class="score-label">OVERALL SCORE</div>
-                <div class="score-value">
-                    ${assessment.overallScore}<span class="score-max">/100</span>
-                </div>
-                <div class="rating">${assessment.rating}</div>
-            </div>
-            <div class="summary">
-                ${assessment.summary}
-            </div>
-        </div>
-        
-        <div class="assessment-grid">
-            ${Object.entries(assessment.checks).map(([key, check]) => {
-                const impactClass = check.impact.toLowerCase().replace(' ', '-');
-                return `
-                    <div class="assessment-card ${impactClass}">
-                        <div class="card-header">
-                            <div class="card-title">${check.name}</div>
-                            <div class="card-score">
-                                ${check.score}<span class="max">/${check.maxScore}</span>
-                            </div>
-                        </div>
-                        <div class="card-impact ${impactClass}">${check.impact}</div>
-                        <div class="card-reason">${check.reason}</div>
-                    </div>
-                `;
-            }).join('')}
-        </div>
-        
-        <div class="fixes-section">
-            <h2 class="section-title">🔧 PRIORITY FIX CHECKLIST</h2>
-            <div class="fixes-list">
-                ${assessment.fixes.map(fix => `
-                    <div class="fix-item ${fix.impact.toLowerCase().replace(' ', '-')}">
-                        <div class="fix-header">
-                            <div class="fix-icon">${fix.icon || '❌'}</div>
-                            <div class="fix-title">${fix.title}</div>
-                            <div class="fix-impact ${fix.impact.toLowerCase().replace(' ', '-')}">
-                                ${fix.impact}
-                            </div>
-                        </div>
-                        <div class="fix-description">${fix.description}</div>
-                        <div class="fix-suggestion">💡 ${fix.suggestion}</div>
-                    </div>
-                `).join('')}
-            </div>
-        </div>
-        
-        <div class="info-footer">
-            <div class="timestamp">Report generated: ${new Date(assessment.timestamp).toLocaleString()}</div>
-            <div class="repo-info">Repository: ${assessment.repository}</div>
-            <div style="margin-top: 12px;">RepoReady - Research Software Readiness Assessment Tool</div>
-        </div>
-    </div>
-</body>
-</html>`;
-}
-
-function showError(message) {
-    const resultDiv = document.getElementById('result');
-    resultDiv.innerHTML = `
-        <div class="error-card">
-            <h3>❌ Assessment Failed</h3>
-            <p>${message}</p>
-            <p class="error-hint">Make sure the repository is public and the URL is correct.</p>
-        </div>
-    `;
-}
-
-function showLoading() {
-    document.getElementById('loading').style.display = 'block';
-    document.getElementById('result').innerHTML = '';
-    document.getElementById('assessBtn').disabled = true;
-}
-
-function hideLoading() {
-    document.getElementById('loading').style.display = 'none';
-    document.getElementById('assessBtn').disabled = false;
-}
-
-async function handleAssessment(repoUrl) {
-    if (!repoUrl) {
-        alert('Please enter a repository URL');
-        return;
-    }
-    
-    // Validate GitHub URL
-    if (!repoUrl.includes('github.com')) {
-        alert('Please enter a valid GitHub repository URL');
-        return;
-    }
-    
-    showLoading();
-    
-    try {
-        const assessment = await assessRepository(repoUrl);
-        renderResults(assessment);
-    } catch (error) {
-        showError(error.message || 'Failed to assess repository. Please try again.');
-    } finally {
-        hideLoading();
-    }
-}
-
-// Load last assessment from localStorage
-function loadLastAssessment() {
-    const lastAssessment = localStorage.getItem(STORAGE_KEY);
-    if (lastAssessment) {
-        try {
-            const assessment = JSON.parse(lastAssessment);
-            renderResults(assessment);
-            document.getElementById('repoUrl').value = assessment.url;
-            showNotification('Last assessment loaded!', 'success');
-        } catch (error) {
-            console.error('Failed to load last assessment:', error);
-            alert('No previous assessment found');
-        }
-    } else {
-        alert('No previous assessment found');
-    }
-}
-
-// Event listeners
-document.addEventListener('DOMContentLoaded', () => {
-    const assessBtn = document.getElementById('assessBtn');
-    const repoInput = document.getElementById('repoUrl');
-    const demoBtns = document.querySelectorAll('.demo-btn');
-    const loadLastBtn = document.getElementById('loadLastBtn');
-    
-    assessBtn.addEventListener('click', () => {
-        handleAssessment(repoInput.value.trim());
-    });
-    
-    repoInput.addEventListener('keypress', (e) => {
-        if (e.key === 'Enter') {
-            handleAssessment(repoInput.value.trim());
-        }
-    });
-    
-    demoBtns.forEach(btn => {
-        if (btn.id !== 'loadLastBtn') {
-            btn.addEventListener('click', () => {
-                const repoUrl = btn.dataset.repo;
-                repoInput.value = repoUrl;
-                handleAssessment(repoUrl);
-            });
-        }
-    });
-    
-    if (loadLastBtn) {
-        loadLastBtn.addEventListener('click', loadLastAssessment);
-    }
-});
+    setTimeout
