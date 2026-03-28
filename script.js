@@ -531,4 +531,430 @@ function generateSummary(readme, license, tests, ci, versioning, citation, total
     else if (tests.score > 0) badPoints.push('limited test coverage');
     else badPoints.push('no test suite');
     
-    if (ci.score
+    if (ci.score >= 10) goodPoints.push('CI/CD automation');
+    else badPoints.push('no CI/CD configuration');
+    
+    if (versioning.score >= 8) goodPoints.push('robust versioning practices');
+    else if (versioning.score > 0) badPoints.push('inconsistent versioning');
+    else badPoints.push('no version tags');
+    
+    if (citation.score >= 8) goodPoints.push('proper citation metadata');
+    else badPoints.push('missing citation information');
+    
+    let summary = '';
+    if (goodPoints.length > 0) {
+        summary += `The repository exhibits ${goodPoints.join(', ')}. `;
+    }
+    
+    if (badPoints.length > 0) {
+        summary += `However, it fails several core 'research-readiness' benchmarks due to ${badPoints.join(', ')}. `;
+        summary += `These omissions create significant barriers for academic reuse, verification, and legal compliance.`;
+    } else if (goodPoints.length > 0) {
+        summary += `These practices create a solid foundation for research software.`;
+    } else {
+        summary += `The repository needs significant improvements to meet research software standards.`;
+    }
+    
+    return summary;
+}
+
+function generateHTMLReport(assessment) {
+    return `<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RepoReady Assessment Report - ${assessment.repository}</title>
+    <style>
+        body { 
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; 
+            line-height: 1.6; 
+            color: #141414; 
+            background: #E4E3E0; 
+            padding: 40px; 
+        }
+        .container { 
+            max-width: 800px; 
+            margin: 0 auto; 
+            background: white; 
+            padding: 40px; 
+            border: 1px solid #141414; 
+        }
+        h1 { 
+            text-transform: uppercase; 
+            letter-spacing: -0.02em; 
+            border-bottom: 2px solid #141414; 
+            padding-bottom: 10px; 
+        }
+        .score-box { 
+            font-size: 48px; 
+            font-weight: bold; 
+            margin: 20px 0; 
+        }
+        .summary { 
+            font-style: italic; 
+            margin-bottom: 30px; 
+            color: #444; 
+        }
+        .check-item { 
+            border-bottom: 1px solid #eee; 
+            padding: 15px 0; 
+        }
+        .check-header { 
+            display: flex; 
+            justify-content: space-between; 
+            font-weight: bold; 
+        }
+        .status-passed { 
+            color: #059669; 
+        }
+        .status-failed { 
+            color: #dc2626; 
+        }
+        .rationale { 
+            font-size: 14px; 
+            color: #666; 
+            margin-top: 5px; 
+        }
+        .fix-list { 
+            background: #f9f9f9; 
+            padding: 20px; 
+            border: 1px dashed #141414; 
+            margin-top: 30px; 
+        }
+        .fix-item { 
+            margin-bottom: 15px; 
+            font-size: 14px; 
+            padding: 10px;
+            border-left: 3px solid;
+        }
+        .fix-item.high { 
+            border-left-color: #dc2626; 
+        }
+        .fix-item.medium { 
+            border-left-color: #f59e0b; 
+        }
+        .fix-item.low { 
+            border-left-color: #10b981; 
+        }
+        .priority-high { 
+            color: #dc2626; 
+            font-weight: bold; 
+        }
+        .priority-medium { 
+            color: #f59e0b; 
+            font-weight: bold; 
+        }
+        .priority-low { 
+            color: #10b981; 
+            font-weight: bold; 
+        }
+        .footer {
+            margin-top: 40px;
+            font-size: 12px;
+            opacity: 0.5;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>RepoReady Assessment Report</h1>
+        <div class="score-box">Score: ${assessment.overallScore}/100</div>
+        <p class="summary">${assessment.summary}</p>
+        
+        <h2>Detailed Assessment</h2>
+        
+        ${assessment.checks.map(check => `
+            <div class="check-item">
+                <div class="check-header">
+                    <span>${check.label}</span>
+                    <span class="${check.passed ? 'status-passed' : 'status-failed'}">
+                        ${check.passed ? 'PASSED' : 'FAILED'} (${check.score}/${check.maxScore})
+                    </span>
+                </div>
+                <div class="rationale">${check.rationale}</div>
+            </div>
+        `).join('')}
+        
+        <div class="fix-list">
+            <h2>Priority Fixes</h2>
+            ${assessment.fixes.map(fix => `
+                <div class="fix-item ${fix.priority.toLowerCase()}">
+                    <div class="${fix.priority === 'HIGH' ? 'priority-high' : fix.priority === 'MEDIUM' ? 'priority-medium' : 'priority-low'}">
+                        [${fix.impact}]
+                    </div>
+                    <div>${fix.task}</div>
+                </div>
+            `).join('')}
+        </div>
+        
+        <div class="footer">
+            Generated by RepoReady on ${assessment.timestamp}
+        </div>
+    </div>
+</body>
+</html>`;
+}
+
+function generateJSONReport(assessment) {
+    return JSON.stringify({
+        score: assessment.overallScore,
+        summary: assessment.summary,
+        checks: assessment.checks,
+        fixChecklist: assessment.fixes.map(fix => ({
+            task: fix.task,
+            impact: fix.impact,
+            priority: fix.priority === 'HIGH' ? 3 : fix.priority === 'MEDIUM' ? 2 : 1
+        }))
+    }, null, 2);
+}
+
+function downloadHTMLReport(assessment) {
+    const htmlContent = generateHTMLReport(assessment);
+    const blob = new Blob([htmlContent], { type: 'text/html' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `repoready-report-${assessment.repository.replace('/', '-')}.html`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    showNotification('✅ HTML report downloaded!', 'success');
+}
+
+function downloadJSONReport(assessment) {
+    const jsonContent = generateJSONReport(assessment);
+    const blob = new Blob([jsonContent], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `repoready-report-${assessment.repository.replace('/', '-')}.json`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    showNotification('✅ JSON report downloaded!', 'success');
+}
+
+function renderResults(assessment) {
+    currentAssessment = assessment;
+    
+    const resultDiv = document.getElementById('result');
+    
+    const html = `
+        <div class="report-actions">
+            <button id="downloadHtmlBtn" class="report-btn download-btn">
+                📄 Download HTML Report
+            </button>
+            <button id="downloadJsonBtn" class="report-btn download-btn">
+                💾 Download JSON Report
+            </button>
+        </div>
+        
+        <div class="score-card">
+            <div class="score-header">
+                <div class="score-label">OVERALL SCORE</div>
+                <div class="score-value">
+                    ${assessment.overallScore}<span class="score-max">/100</span>
+                </div>
+                <div class="rating">${assessment.rating}</div>
+            </div>
+            <div class="summary">
+                ${assessment.summary}
+            </div>
+        </div>
+        
+        <div class="assessment-grid">
+            ${assessment.checks.map(check => {
+                const impactClass = check.impact;
+                const isPassed = check.passed;
+                const scoreClass = isPassed ? 'score-good' : 'score-low';
+                return `
+                    <div class="assessment-card ${impactClass}-impact">
+                        <div class="card-header">
+                            <div class="card-title">${check.label}</div>
+                            <div class="card-score ${scoreClass}">
+                                ${check.score}<span class="max">/${check.maxScore}</span>
+                            </div>
+                        </div>
+                        <div class="card-impact ${impactClass}">${check.impact.toUpperCase()} IMPACT</div>
+                        <div class="card-reason">${check.rationale}</div>
+                    </div>
+                `;
+            }).join('')}
+        </div>
+        
+        <div class="fixes-section">
+            <h2 class="section-title">🔧 PRIORITY FIX CHECKLIST</h2>
+            <div class="fixes-list">
+                ${assessment.fixes.map(fix => `
+                    <div class="fix-item ${fix.priority.toLowerCase()}">
+                        <div class="fix-header">
+                            <div class="fix-icon">${fix.task.charAt(0)}</div>
+                            <div class="fix-title">${fix.task}</div>
+                            <div class="fix-impact ${fix.priority.toLowerCase()}">
+                                ${fix.priority} IMPACT
+                            </div>
+                        </div>
+                        <div class="fix-description">${fix.impact}</div>
+                    </div>
+                `).join('')}
+            </div>
+        </div>
+        
+        <div class="info-footer">
+            <div class="timestamp">Report generated: ${assessment.timestamp}</div>
+            <div class="repo-info">Repository: ${assessment.repository}</div>
+        </div>
+    `;
+    
+    resultDiv.innerHTML = html;
+    resultDiv.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    
+    // Add event listeners for download buttons
+    setTimeout(() => {
+        const htmlBtn = document.getElementById('downloadHtmlBtn');
+        const jsonBtn = document.getElementById('downloadJsonBtn');
+        
+        if (htmlBtn) {
+            htmlBtn.onclick = () => downloadHTMLReport(assessment);
+        }
+        if (jsonBtn) {
+            jsonBtn.onclick = () => downloadJSONReport(assessment);
+        }
+    }, 100);
+}
+
+function showNotification(message, type) {
+    const existing = document.querySelector('.notification');
+    if (existing) existing.remove();
+    
+    const notification = document.createElement('div');
+    notification.className = `notification ${type}`;
+    notification.textContent = message;
+    notification.style.cssText = `
+        position: fixed;
+        bottom: 24px;
+        right: 24px;
+        padding: 12px 24px;
+        border-radius: 12px;
+        background: ${type === 'success' ? '#48bb78' : '#f56565'};
+        color: white;
+        font-weight: 500;
+        z-index: 10000;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+    `;
+    document.body.appendChild(notification);
+    
+    setTimeout(() => notification.remove(), 3000);
+}
+
+function showError(message) {
+    const resultDiv = document.getElementById('result');
+    resultDiv.innerHTML = `
+        <div class="error-card">
+            <h3>❌ Assessment Failed</h3>
+            <p>${message}</p>
+            <p class="error-hint">Make sure the repository is public and the URL is correct.</p>
+            <p class="error-hint">Examples: facebook/react, tensorflow/tensorflow, octocat/Spoon-Knife</p>
+        </div>
+    `;
+}
+
+function showLoading() {
+    const loadingDiv = document.getElementById('loading');
+    if (loadingDiv) loadingDiv.style.display = 'block';
+    const resultDiv = document.getElementById('result');
+    if (resultDiv) resultDiv.innerHTML = '';
+    const assessBtn = document.getElementById('assessBtn');
+    if (assessBtn) assessBtn.disabled = true;
+}
+
+function hideLoading() {
+    const loadingDiv = document.getElementById('loading');
+    if (loadingDiv) loadingDiv.style.display = 'none';
+    const assessBtn = document.getElementById('assessBtn');
+    if (assessBtn) assessBtn.disabled = false;
+}
+
+async function handleAssessment(input) {
+    if (!input) {
+        showError('Please enter a repository owner/repo name');
+        return;
+    }
+    
+    let cleanInput = input.replace('https://github.com/', '').replace('.git', '').trim();
+    const parts = cleanInput.split('/');
+    
+    let owner, repo;
+    if (parts.length === 2) {
+        owner = parts[0];
+        repo = parts[1];
+    } else {
+        showError('Invalid format. Use "owner/repo" (e.g., facebook/react)');
+        return;
+    }
+    
+    showLoading();
+    
+    try {
+        const assessment = await assessRepository(owner, repo);
+        renderResults(assessment);
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(assessment));
+    } catch (error) {
+        console.error('Error:', error);
+        showError(error.message || 'Failed to assess repository. Please try again.');
+    } finally {
+        hideLoading();
+    }
+}
+
+function loadLastAssessment() {
+    const last = localStorage.getItem(STORAGE_KEY);
+    if (last) {
+        try {
+            const assessment = JSON.parse(last);
+            renderResults(assessment);
+            const repoInput = document.getElementById('repoInput');
+            if (repoInput) repoInput.value = assessment.repository;
+            showNotification('Last assessment loaded!', 'success');
+        } catch (e) {
+            showError('Failed to load last assessment');
+        }
+    } else {
+        showError('No previous assessment found');
+    }
+}
+
+// Initialize event listeners when DOM is ready
+document.addEventListener('DOMContentLoaded', function() {
+    console.log('RepoReady initialized - all buttons ready');
+    
+    const assessBtn = document.getElementById('assessBtn');
+    const repoInput = document.getElementById('repoInput');
+    const loadLastBtn = document.getElementById('loadLastBtn');
+    
+    if (assessBtn) {
+        assessBtn.addEventListener('click', function() {
+            const input = repoInput ? repoInput.value.trim() : '';
+            handleAssessment(input);
+        });
+        console.log('Assess button attached');
+    }
+    
+    if (repoInput) {
+        repoInput.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                handleAssessment(repoInput.value.trim());
+            }
+        });
+        console.log('Enter key handler attached');
+    }
+    
+    if (loadLastBtn) {
+        loadLastBtn.addEventListener('click', loadLastAssessment);
+        console.log('Load last button attached');
+    }
+});
