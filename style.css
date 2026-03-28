@@ -653,3 +653,38 @@ body {
 .notification {
     animation: slideIn 0.3s ease-out;
 }
+/* Add these to your existing style.css */
+
+/* Score colors */
+.card-score.score-low {
+    color: #f56565 !important;
+}
+
+.card-score.score-good {
+    color: #48bb78 !important;
+}
+
+/* Fix item priority colors */
+.fix-item.high {
+    border-left-color: #f56565;
+}
+
+.fix-item.medium {
+    border-left-color: #ed8936;
+}
+
+.fix-item.low {
+    border-left-color: #48bb78;
+}
+
+.fix-impact.high {
+    color: #f56565;
+}
+
+.fix-impact.medium {
+    color: #ed8936;
+}
+
+.fix-impact.low {
+    color: #48bb78;
+}
